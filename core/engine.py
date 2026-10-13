@@ -4,7 +4,184 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT
+from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, QUEST_TEMPLATES
+
+_quest_id_counter = 1
+
+
+def update_faction_relations(state):
+    """每日结算：更新势力之间的动态关系。"""
+    f_ids = list(FACTIONS.keys())
+    if len(f_ids) < 2:
+        return
+
+    f1_id, f2_id = random.sample(f_ids, 2)
+    if random.random() < 0.10:
+        rel = FACTIONS[f1_id]["relations"].get(f2_id, 0)
+        if rel < 0:
+            FACTIONS[f1_id]["relations"][f2_id] = 20
+            FACTIONS[f2_id]["relations"][f1_id] = 20
+            msg = f"【势力外交】{FACTIONS[f1_id]['name']} 与 {FACTIONS[f2_id]['name']} 达成了停战协议！"
+        else:
+            FACTIONS[f1_id]["relations"][f2_id] = -50
+            FACTIONS[f2_id]["relations"][f1_id] = -50
+            msg = f"【势力外交】{FACTIONS[f1_id]['name']} 向 {FACTIONS[f2_id]['name']} 正式宣战！"
+        state.add_log(msg)
+
+
+def generate_quests(location_id):
+    """每日结算：为城镇生成任务。"""
+    global _quest_id_counter
+    loc = LOCATIONS.get(location_id)
+    if not loc or loc.get("type") != "town":
+        return
+
+    if "active_quests" not in loc:
+        loc["active_quests"] = []
+
+    active_quests = loc["active_quests"]
+    other_locations = [lid for lid in LOCATIONS if lid != location_id]
+
+    while len(active_quests) < 3:
+        template = random.choice(QUEST_TEMPLATES)
+        q_type = template["type"]
+        q_id = f"q_{_quest_id_counter}"
+        _quest_id_counter += 1
+
+        if q_type == "hunt_bandits":
+            count = random.randint(3, 10)
+            unit_id = random.choice(list(UNITS.keys()))
+            unit_name = UNITS[unit_id]["name"]
+            desc = f"剿灭 {count} 个 {unit_name} 匪徒"
+            quest = {
+                "id": q_id,
+                "type": q_type,
+                "desc": desc,
+                "reward_cash": template["reward_cash"],
+                "reward_renown": template["reward_renown"],
+                "target_count": count,
+                "current_count": 0,
+                "unit_id": unit_id,
+                "location_id": location_id,
+            }
+        elif q_type == "deliver_goods":
+            amount = random.randint(3, 8)
+            goods_id = random.choice(list(GOODS.keys()))
+            goods_name = GOODS[goods_id]["name"]
+            target_loc_id = random.choice(other_locations)
+            target_loc_name = LOCATIONS[target_loc_id]["name"]
+            desc = f"将 {amount} 单位 {goods_name} 从 {loc['name']} 运到 {target_loc_name}"
+            quest = {
+                "id": q_id,
+                "type": q_type,
+                "desc": desc,
+                "reward_cash": template["reward_cash"],
+                "reward_renown": template["reward_renown"],
+                "goods_id": goods_id,
+                "amount": amount,
+                "target_location": target_loc_id,
+                "location_id": location_id,
+            }
+        elif q_type == "escort":
+            target_loc_id = random.choice(other_locations)
+            target_loc_name = LOCATIONS[target_loc_id]["name"]
+            desc = f"护送商队从 {loc['name']} 到 {target_loc_name}"
+            quest = {
+                "id": q_id,
+                "type": q_type,
+                "desc": desc,
+                "reward_cash": template["reward_cash"],
+                "reward_renown": template["reward_renown"],
+                "target_location": target_loc_id,
+                "location_id": location_id,
+            }
+        else:
+            continue
+
+        active_quests.append(quest)
+
+
+def accept_quest(state, quest_id):
+    """玩家接取城镇任务板上的任务。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    loc = LOCATIONS.get(state.location, {})
+    active_quests = loc.get("active_quests", [])
+
+    target_quest = None
+    for q in active_quests:
+        if q["id"] == quest_id:
+            target_quest = q
+            break
+
+    if not target_quest:
+        return f"城镇任务板上未找到任务 '{quest_id}'"
+
+    active_quests.remove(target_quest)
+    state.active_quests.append(target_quest)
+    msg = f"成功接取任务：{target_quest['desc']}"
+    state.add_log(msg)
+    return msg
+
+
+def complete_quest(state, quest_id):
+    """尝试完成玩家接取的任务。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    target_quest = None
+    for q in state.active_quests:
+        if q["id"] == quest_id:
+            target_quest = q
+            break
+
+    if not target_quest:
+        return f"你当前未接取任务 '{quest_id}'"
+
+    q_type = target_quest["type"]
+
+    if q_type == "deliver_goods":
+        target_loc_id = target_quest["target_location"]
+        target_loc_name = LOCATIONS.get(target_loc_id, {}).get("name", target_loc_id)
+        if state.location != target_loc_id:
+            return f"尚未到达目标地点！需要将货物运送到 [{target_loc_name}]"
+
+        goods_id = target_quest["goods_id"]
+        goods_name = GOODS.get(goods_id, {}).get("name", goods_id)
+        amount = target_quest["amount"]
+        current_amount = state.inventory.get(goods_id, 0)
+        if current_amount < amount:
+            return f"货物不足！需要 {amount} 单位 {goods_name}，当前持有 {current_amount} 单位"
+
+        state.inventory[goods_id] -= amount
+
+    elif q_type == "escort":
+        target_loc_id = target_quest["target_location"]
+        target_loc_name = LOCATIONS.get(target_loc_id, {}).get("name", target_loc_id)
+        if state.location != target_loc_id:
+            return f"尚未到达目标地点！需要护送商队到达 [{target_loc_name}]"
+
+    elif q_type == "hunt_bandits":
+        curr_cnt = target_quest.get("current_count", 0)
+        target_cnt = target_quest.get("target_count", 1)
+        if curr_cnt < target_cnt:
+            return f"任务未完成！还需剿灭 {target_cnt - curr_cnt} 个匪徒"
+
+    reward_cash = target_quest.get("reward_cash", 0)
+    reward_renown = target_quest.get("reward_renown", 0)
+
+    state.cash += reward_cash
+    state.renown += reward_renown
+
+    state.active_quests.remove(target_quest)
+    state.completed_quests.append(quest_id)
+
+    msg = f"成功完成任务 [{target_quest['desc']}]！获得 {reward_cash} 金币，{reward_renown} 声望。"
+    state.add_log(msg)
+    return msg
 
 
 def hire_companion(state, companion_id):
@@ -85,11 +262,16 @@ def conquer_location(state, location_id, action):
 
 
 def daily_update(state):
-    """每日结算：收税、耗粮与士气/解散判定。
+    """每日结算：收税、耗粮、势力关系演变、任务生成与士气/解散判定。
 
     返回:
         str: 每日结算报告字符串
     """
+    # 0. 外交动态演变与任务生成
+    update_faction_relations(state)
+    for loc_id in LOCATIONS:
+        generate_quests(loc_id)
+
     # 1. 收税
     tax_income = 0
     for fief_id in state.fiefs:
@@ -374,6 +556,20 @@ def resolve_combat_simple(state, enemy_power, choice):
         if p_count > 0:
             state.prisoners["peasant"] = state.prisoners.get("peasant", 0) + p_count
             prisoners_gained["peasant"] = p_count
+
+        # 3. 更新剿灭匪徒任务进度
+        for q in state.active_quests:
+            if q.get("type") == "hunt_bandits":
+                q["current_count"] = min(q.get("target_count", 1), q.get("current_count", 0) + 1)
+
+    # 4. 势力关系扣减判定
+    loc_info = LOCATIONS.get(state.location, {})
+    faction_id = loc_info.get("faction_id")
+    if faction_id and faction_id in state.faction_relations:
+        state.faction_relations[faction_id] -= 10
+        faction_name = FACTIONS.get(faction_id, {}).get("name", faction_id)
+        faction_notice = f"你攻击了 {faction_name} 的部队，关系下降。"
+        message += f" ({faction_notice})"
 
     state.add_log(f"选择{'主动进攻' if choice == 'attack' else '筑防坚守'}。{message}")
     return {

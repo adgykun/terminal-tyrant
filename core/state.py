@@ -22,6 +22,9 @@ class GameState:
         prisoners=None,
         personal_power=10,
         loot=None,
+        faction_relations=None,
+        active_quests=None,
+        completed_quests=None,
     ):
         self.day = day
         self.gold = gold
@@ -39,6 +42,9 @@ class GameState:
         self.prisoners = prisoners if prisoners is not None else {}
         self.personal_power = personal_power
         self.loot = loot if loot is not None else []
+        self.faction_relations = faction_relations if faction_relations is not None else {"f1": 0, "f2": 0, "f3": 0}
+        self.active_quests = active_quests if active_quests is not None else []
+        self.completed_quests = completed_quests if completed_quests is not None else []
 
     @property
     def cash(self):
@@ -82,6 +88,9 @@ class GameState:
             "prisoners": dict(self.prisoners),
             "personal_power": self.personal_power,
             "loot": list(self.loot),
+            "faction_relations": dict(self.faction_relations),
+            "active_quests": [dict(q) if isinstance(q, dict) else q for q in self.active_quests],
+            "completed_quests": list(self.completed_quests),
         }
 
     @classmethod
@@ -104,6 +113,9 @@ class GameState:
             prisoners=data.get("prisoners", {}),
             personal_power=data.get("personal_power", 10),
             loot=data.get("loot", []),
+            faction_relations=data.get("faction_relations", {"f1": 0, "f2": 0, "f3": 0}),
+            active_quests=data.get("active_quests", []),
+            completed_quests=data.get("completed_quests", []),
         )
 
     def save(self, filepath):

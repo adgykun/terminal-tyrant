@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS
 from core.engine import (
     move,
     rest,
@@ -15,6 +15,8 @@ from core.engine import (
     sell_prisoners,
     recruit_prisoner,
     arena_fight,
+    accept_quest,
+    complete_quest,
 )
 
 TYPE_NAMES = {
@@ -52,18 +54,28 @@ def format_barracks_info(loc_info):
 
 
 def format_tavern_info(loc_info):
-    """格式化地点的酒馆信息。"""
+    """格式化地点的酒馆与任务板信息。"""
     tavern = loc_info.get("tavern", [])
-    if not tavern:
-        return None
+    active_quests = loc_info.get("active_quests", [])
     items = []
-    for c_id in tavern:
-        c_info = COMPANIONS.get(c_id, {})
-        c_name = c_info.get("name", c_id)
-        cost = c_info.get("cost", 0)
-        req_r = c_info.get("required_renown", 0)
-        items.append(f"{c_name}(id:{c_id}, {cost}金/需{req_r}声望)")
-    return f"【酒馆】可招募同伴：{', '.join(items)}"
+    if tavern:
+        for c_id in tavern:
+            c_info = COMPANIONS.get(c_id, {})
+            c_name = c_info.get("name", c_id)
+            cost = c_info.get("cost", 0)
+            req_r = c_info.get("required_renown", 0)
+            items.append(f"{c_name}(id:{c_id}, {cost}金/需{req_r}声望)")
+
+    res = f"【酒馆】可招募同伴：{', '.join(items)}" if items else ""
+    if loc_info.get("type") == "town":
+        if res:
+            res += "\n"
+        if active_quests:
+            q_strs = [f"[{q['id']}] {q['desc']} (报酬:{q['reward_cash']}金/{q['reward_renown']}声望)" for q in active_quests]
+            res += f"【任务板】可用任务：\n  " + "\n  ".join(q_strs)
+        else:
+            res += "【任务板】暂无可用任务"
+    return res if res else None
 
 
 def render_location_header(state):
@@ -106,8 +118,18 @@ def render_location_header(state):
     print("=" * 45)
 
 
+def get_relation_label(val):
+    """获取玩家与势力关系的文本标签。"""
+    if val >= 40:
+        return f"友好({val})"
+    elif val <= -20:
+        return f"敌对({val})"
+    else:
+        return f"中立({val})"
+
+
 def render_status(state):
-    """显示玩家当前的军队、装备、俘虏、背包、同伴与封地状态信息。"""
+    """显示玩家当前的势力关系、军队、装备、俘虏、背包、同伴与封地状态信息。"""
     curr_info = LOCATIONS.get(state.location, {})
     loc_name = curr_info.get("name", state.location)
     eq_bonus = sum(
@@ -130,6 +152,23 @@ def render_status(state):
     print(f"带兵数量: {current_soldiers}/{state.max_army_size}")
     print(f"个人战力: {state.personal_power} | 装备加成: +{eq_bonus}")
     print(f"军队总战力: {army_power} | 综合战力: {total_power}")
+
+    print("\n[势力关系]")
+    for fid, f_info in FACTIONS.items():
+        fname = f_info.get("name", fid)
+        rel_val = state.faction_relations.get(fid, 0)
+        label = get_relation_label(rel_val)
+        print(f"  - {fname}: {label}")
+
+    print("\n[已接取任务]")
+    if state.active_quests:
+        for q in state.active_quests:
+            progress = ""
+            if q.get("type") == "hunt_bandits":
+                progress = f" (进度: {q.get('current_count', 0)}/{q.get('target_count', 1)})"
+            print(f"  - [{q['id']}] {q['desc']}{progress}")
+    else:
+        print("  无接取任务")
 
     print("\n[玩家装备]")
     if state.equipment:
@@ -325,6 +364,9 @@ def start_cli(state):
         print("  sell_prisoner <兵种id> <数量> - 出售俘虏")
         print("  recruit_prisoner <兵种id> <数量> - 招募俘虏为士兵")
         print("  arena <轮数>            - 竞技场打擂")
+        print("  quest list               - 查看当前接取的任务及进度")
+        print("  quest accept <任务id>    - 接取任务")
+        print("  quest complete <任务id>  - 尝试完成任务")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
         print("  q                        - 退出游戏")
@@ -342,6 +384,38 @@ def start_cli(state):
 
         elif cmd == "status":
             render_status(state)
+
+        elif cmd == "quest":
+            if len(parts) < 2:
+                print("请指定 quest 子指令！用法: quest list | quest accept <任务id> | quest complete <任务id>")
+                continue
+            sub_cmd = parts[1].lower()
+            if sub_cmd == "list":
+                print("\n【当前接取任务列表】")
+                if state.active_quests:
+                    for q in state.active_quests:
+                        progress = ""
+                        if q.get("type") == "hunt_bandits":
+                            progress = f" (进度: {q.get('current_count', 0)}/{q.get('target_count', 1)})"
+                        print(f"  - [{q['id']}] {q['desc']}{progress}")
+                else:
+                    print("  暂未接取任何任务")
+            elif sub_cmd == "accept":
+                if len(parts) < 3:
+                    print("请指定要接取的任务ID！例如: quest accept q_1")
+                    continue
+                q_id = parts[2]
+                res = accept_quest(state, q_id)
+                print(f"\n{res}")
+            elif sub_cmd == "complete":
+                if len(parts) < 3:
+                    print("请指定要完成的任务ID！例如: quest complete q_1")
+                    continue
+                q_id = parts[2]
+                res = complete_quest(state, q_id)
+                print(f"\n{res}")
+            else:
+                print(f"未知的 quest 子指令: '{sub_cmd}'")
 
         elif cmd == "rest":
             rest(state)

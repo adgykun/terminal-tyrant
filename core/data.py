@@ -1,5 +1,47 @@
 """数据定义模块：包含装备、兵种、地图地点与随机事件配置。"""
 
+FACTIONS = {
+    "f1": {
+        "id": "f1",
+        "name": "斯瓦迪亚",
+        "color": "blue",
+        "relations": {"f2": 0, "f3": 0},
+    },
+    "f2": {
+        "id": "f2",
+        "name": "罗多克",
+        "color": "green",
+        "relations": {"f1": 0, "f3": 0},
+    },
+    "f3": {
+        "id": "f3",
+        "name": "维吉亚",
+        "color": "red",
+        "relations": {"f1": 0, "f2": 0},
+    },
+}
+
+QUEST_TEMPLATES = [
+    {
+        "type": "hunt_bandits",
+        "desc": "剿灭 [数量] 个 [兵种] 匪徒",
+        "reward_cash": 200,
+        "reward_renown": 10,
+    },
+    {
+        "type": "deliver_goods",
+        "desc": "将 [数量] 单位 [商品] 从 [地点A] 运到 [地点B]",
+        "reward_cash": 300,
+        "reward_renown": 15,
+    },
+    {
+        "type": "escort",
+        "desc": "护送商队从 [地点A] 到 [地点B]",
+        "reward_cash": 150,
+        "reward_renown": 5,
+    },
+]
+
 EQUIPMENT = {
     "w1": {
         "id": "w1",
@@ -110,6 +152,7 @@ LOCATIONS = {
         "id": "oak_village",
         "name": "橡木村",
         "type": "village",
+        "faction_id": "f1",
         "owner": "neutral",
         "tax_income": 20,
         "slave_market": True,
@@ -123,6 +166,7 @@ LOCATIONS = {
         "id": "pine_village",
         "name": "松木村",
         "type": "village",
+        "faction_id": "f2",
         "owner": "neutral",
         "tax_income": 20,
         "slave_market": True,
@@ -136,6 +180,8 @@ LOCATIONS = {
         "id": "river_town",
         "name": "河畔镇",
         "type": "town",
+        "faction_id": "f1",
+        "active_quests": [],
         "owner": "neutral",
         "tax_income": 50,
         "arena": True,
@@ -152,6 +198,8 @@ LOCATIONS = {
         "id": "iron_town",
         "name": "铁矿镇",
         "type": "town",
+        "faction_id": "f2",
+        "active_quests": [],
         "owner": "neutral",
         "tax_income": 50,
         "arena": True,
@@ -168,6 +216,7 @@ LOCATIONS = {
         "id": "wild_forest",
         "name": "迷雾森林",
         "type": "wild",
+        "faction_id": "f3",
         "slave_market": True,
         "neighbors": ["river_town", "wild_mountain"],
         "market": {},
@@ -177,6 +226,7 @@ LOCATIONS = {
         "id": "wild_mountain",
         "name": "黑风山",
         "type": "wild",
+        "faction_id": "f3",
         "slave_market": True,
         "neighbors": ["iron_town", "wild_forest"],
         "market": {},
@@ -186,6 +236,8 @@ LOCATIONS = {
         "id": "central_city",
         "name": "许昌大都",
         "type": "town",
+        "faction_id": "f3",
+        "active_quests": [],
         "owner": "neutral",
         "tax_income": 100,
         "arena": True,
