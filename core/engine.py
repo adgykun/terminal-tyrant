@@ -4,7 +4,7 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, QUEST_TEMPLATES
+from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, QUEST_TEMPLATES, POLICIES
 
 _quest_id_counter = 1
 
@@ -272,11 +272,28 @@ def daily_update(state):
     for loc_id in LOCATIONS:
         generate_quests(loc_id)
 
-    # 1. 收税
-    tax_income = 0
+    # 1. 收税（领主管理，税收减半）
+    tax_income = 0.0
     for fief_id in state.fiefs:
         f_info = LOCATIONS.get(fief_id, {})
-        tax_income += f_info.get("tax_income", 0)
+        base_tax = f_info.get("tax_income", 0)
+        if f_info.get("owner") == "lord":
+            tax_income += base_tax * 0.5
+        else:
+            tax_income += base_tax
+
+    # 1.1 政策叠加效果
+    if state.is_king and state.current_policy:
+        if state.current_policy == "tax_high":
+            tax_income *= 1.5
+            state.morale = max(0, state.morale - 5)
+        elif state.current_policy == "tax_low":
+            tax_income *= 0.8
+            state.morale = min(100, state.morale + 5)
+        elif state.current_policy == "conscription":
+            state.renown = max(0, state.renown - 2)
+
+    tax_income = int(tax_income)
     state.cash += tax_income
 
     # 2. 耗粮
@@ -810,6 +827,99 @@ def recruit(state, location_id, unit_id, quantity):
     state.cash -= total_cost
     state.troops[unit_id] = state.troops.get(unit_id, 0) + quantity
     msg = f"成功招募 {quantity} {unit_name}，花费 {total_cost} 金"
+    state.add_log(msg)
+    return msg
+
+
+def declare_kingdom(state, kingdom_name):
+    """建国称王逻辑。
+
+    参数:
+        state: 当前 GameState 实例
+        kingdom_name: 建国名称
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if state.is_king:
+        return f"你已经建立了王国 [{state.kingdom_name}]，无需重复建国！"
+
+    if state.renown < 500:
+        return f"声望不足，无法建国！建国需要至少 500 声望，当前声望：{state.renown}。"
+
+    if len(state.fiefs) < 3:
+        return f"封地不足，无法建国！建国需要至少 3 个封地，当前封地数量：{len(state.fiefs)}。"
+
+    state.is_king = True
+    state.kingdom_name = kingdom_name
+    msg = f"恭喜！你成功建立王国 [{kingdom_name}]，自立为王！"
+    state.add_log(msg)
+    return msg
+
+
+def assign_lord(state, companion_id, location_id):
+    """分封同伴为领主管理封地。
+
+    参数:
+        state: 当前 GameState 实例
+        companion_id: 同伴 ID
+        location_id: 地点 ID
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if not state.is_king:
+        return "尚未建国，无法分封领主！"
+
+    if companion_id not in state.companions:
+        comp_name = COMPANIONS.get(companion_id, {}).get("name", companion_id)
+        return f"未招募同伴 '{comp_name}'！"
+
+    if companion_id in state.lords:
+        comp_name = COMPANIONS.get(companion_id, {}).get("name", companion_id)
+        return f"同伴 '{comp_name}' 已经被分封为领主！"
+
+    if location_id not in state.fiefs:
+        loc_name = LOCATIONS.get(location_id, {}).get("name", location_id)
+        return f"地点 '{loc_name}' 不是你的封地！"
+
+    state.lords.append(companion_id)
+    loc = LOCATIONS.get(location_id)
+    if loc:
+        loc["owner"] = "lord"
+
+    comp_name = COMPANIONS.get(companion_id, {}).get("name", companion_id)
+    loc_name = LOCATIONS.get(location_id, {}).get("name", location_id)
+    msg = f"成功分封同伴 [{comp_name}] 管理 [{loc_name}]！"
+    state.add_log(msg)
+    return msg
+
+
+def set_policy(state, policy_id):
+    """制定国家政策。
+
+    参数:
+        state: 当前 GameState 实例
+        policy_id: 政策 ID
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if not state.is_king:
+        return "尚未建国，无法制定国家政策！"
+
+    if policy_id not in POLICIES:
+        return f"政策 '{policy_id}' 不存在！"
+
+    old_policy = state.current_policy
+    if old_policy != "conscription" and policy_id == "conscription":
+        state.max_army_size += 20
+    elif old_policy == "conscription" and policy_id != "conscription":
+        state.max_army_size -= 20
+
+    state.current_policy = policy_id
+    policy_name = POLICIES[policy_id]["name"]
+    msg = f"成功制定国家政策：[{policy_name}]！"
     state.add_log(msg)
     return msg
 

@@ -297,3 +297,21 @@ GOODS = {
         "base_price": 20,
     },
 }
+
+POLICIES = {
+    "tax_high": {
+        "id": "tax_high",
+        "name": "重税",
+        "effect": "tax_income * 1.5, morale -5/day",
+    },
+    "tax_low": {
+        "id": "tax_low",
+        "name": "轻薄赋",
+        "effect": "tax_income * 0.8, morale +5/day",
+    },
+    "conscription": {
+        "id": "conscription",
+        "name": "强制征兵",
+        "effect": "max_army_size +20, renown -2/day",
+    },
+}

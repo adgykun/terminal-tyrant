@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES
 from core.engine import (
     move,
     rest,
@@ -17,6 +17,9 @@ from core.engine import (
     arena_fight,
     accept_quest,
     complete_quest,
+    declare_kingdom,
+    assign_lord,
+    set_policy,
 )
 
 TYPE_NAMES = {
@@ -206,9 +209,23 @@ def render_status(state):
             f_info = LOCATIONS.get(f_id, {})
             f_name = f_info.get("name", f_id)
             f_tax = f_info.get("tax_income", 0)
-            print(f"  - {f_name} ({f_id}) [每日税收: {f_tax} 金]")
+            f_owner = f_info.get("owner", "player")
+            owner_label = "领主代管" if f_owner == "lord" else "亲自管理"
+            print(f"  - {f_name} ({f_id}) [每日基础税收: {f_tax} 金 / 管理模式: {owner_label}]")
     else:
         print("  暂无封地")
+
+    print("\n[王国状态]")
+    if state.is_king:
+        policy_info = POLICIES.get(state.current_policy, {})
+        policy_name = policy_info.get("name", "未制定")
+        lord_names = [COMPANIONS.get(lid, {}).get("name", lid) for lid in state.lords]
+        lords_str = ", ".join(lord_names) if lord_names else "无"
+        print(f"  - 王国名称: {state.kingdom_name}")
+        print(f"  - 当前政策: {policy_name}")
+        print(f"  - 分封领主: {lords_str}")
+    else:
+        print("  - 尚未建国")
 
     print("\n[部队成员]")
     has_troops = False
@@ -367,6 +384,10 @@ def start_cli(state):
         print("  quest list               - 查看当前接取的任务及进度")
         print("  quest accept <任务id>    - 接取任务")
         print("  quest complete <任务id>  - 尝试完成任务")
+        print("  kingdom declare <名称>   - 建立你的王国（需500声望与3个封地）")
+        print("  kingdom status          - 查看王国状态")
+        print("  lord assign <同伴id> <地点id> - 分封领主管理封地")
+        print("  policy set <政策id>      - 制定国家政策")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
         print("  q                        - 退出游戏")
@@ -416,6 +437,68 @@ def start_cli(state):
                 print(f"\n{res}")
             else:
                 print(f"未知的 quest 子指令: '{sub_cmd}'")
+
+        elif cmd == "kingdom":
+            if len(parts) < 2:
+                print("请指定 kingdom 子指令！用法: kingdom declare <名称> | kingdom status")
+                continue
+            sub_cmd = parts[1].lower()
+            if sub_cmd == "declare":
+                if len(parts) < 3:
+                    print("请指定王国名称！例如: kingdom declare 蜀汉")
+                    continue
+                k_name = parts[2]
+                res = declare_kingdom(state, k_name)
+                print(f"\n{res}")
+            elif sub_cmd == "status":
+                print("\n【王国详细状态】")
+                if state.is_king:
+                    policy_info = POLICIES.get(state.current_policy, {})
+                    policy_name = policy_info.get("name", "未制定")
+                    policy_eff = policy_info.get("effect", "无")
+                    fief_names = [LOCATIONS.get(fid, {}).get("name", fid) for fid in state.fiefs]
+                    fiefs_str = ", ".join(fief_names) if fief_names else "无"
+                    lord_names = [COMPANIONS.get(lid, {}).get("name", lid) for lid in state.lords]
+                    lords_str = ", ".join(lord_names) if lord_names else "无"
+                    print(f"  - 王国名称: {state.kingdom_name}")
+                    print(f"  - 拥有的封地: {fiefs_str}")
+                    print(f"  - 分封的领主: {lords_str}")
+                    print(f"  - 当前政策: {policy_name} ({policy_eff})")
+                else:
+                    print("  尚未建国。需达到 500 声望与 3 个封地后方可建国。")
+            else:
+                print(f"未知的 kingdom 子指令: '{sub_cmd}'")
+
+        elif cmd == "lord":
+            if len(parts) < 2:
+                print("请指定 lord 子指令！用法: lord assign <同伴id> <地点id>")
+                continue
+            sub_cmd = parts[1].lower()
+            if sub_cmd == "assign":
+                if len(parts) < 4:
+                    print("请指定同伴ID和地点ID！例如: lord assign c1 river_town")
+                    continue
+                comp_id = parts[2]
+                target_loc = resolve_location_target(parts[3]) or parts[3]
+                res = assign_lord(state, comp_id, target_loc)
+                print(f"\n{res}")
+            else:
+                print(f"未知的 lord 子指令: '{sub_cmd}'")
+
+        elif cmd == "policy":
+            if len(parts) < 2:
+                print("请指定 policy 子指令！用法: policy set <政策id>")
+                continue
+            sub_cmd = parts[1].lower()
+            if sub_cmd == "set":
+                if len(parts) < 3:
+                    print("请指定政策ID！可选政策: tax_high (重税), tax_low (轻薄赋), conscription (强制征兵)")
+                    continue
+                p_id = parts[2]
+                res = set_policy(state, p_id)
+                print(f"\n{res}")
+            else:
+                print(f"未知的 policy 子指令: '{sub_cmd}'")
 
         elif cmd == "rest":
             rest(state)
