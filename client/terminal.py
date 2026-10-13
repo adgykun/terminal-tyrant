@@ -1,7 +1,18 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS
-from core.engine import move, rest, resolve_combat_simple, calculate_army_power, trade, recruit, upgrade_unit
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS
+from core.engine import (
+    move,
+    rest,
+    resolve_combat_simple,
+    calculate_army_power,
+    trade,
+    recruit,
+    upgrade_unit,
+    hire_companion,
+    conquer_location,
+    daily_update,
+)
 
 TYPE_NAMES = {
     "village": "村庄",
@@ -37,16 +48,36 @@ def format_barracks_info(loc_info):
     return f"【兵营】可招募：{', '.join(items)}"
 
 
+def format_tavern_info(loc_info):
+    """格式化地点的酒馆信息。"""
+    tavern = loc_info.get("tavern", [])
+    if not tavern:
+        return None
+    items = []
+    for c_id in tavern:
+        c_info = COMPANIONS.get(c_id, {})
+        c_name = c_info.get("name", c_id)
+        cost = c_info.get("cost", 0)
+        req_r = c_info.get("required_renown", 0)
+        items.append(f"{c_name}(id:{c_id}, {cost}金/需{req_r}声望)")
+    return f"【酒馆】可招募同伴：{', '.join(items)}"
+
+
 def render_location_header(state):
     """渲染当前地点及周围邻居节点信息。"""
     curr_info = LOCATIONS.get(state.location, {})
     loc_name = curr_info.get("name", state.location)
     loc_type_raw = curr_info.get("type", "unknown")
     loc_type = TYPE_NAMES.get(loc_type_raw, loc_type_raw)
+    current_soldiers = sum(state.troops.values())
 
-    print("\n" + "=" * 45)
+    print("\n" + "=" * 55)
     print(f"【三国大地图】 第 {state.day} 天")
-    print(f"你来到了 [{loc_name}]。 ({loc_type}) | 部队士气: {state.morale}/100 | 金币: {state.gold}")
+    print(
+        f"位置: [{loc_name}] ({loc_type}) | 金币: {state.gold} | 声望: {state.renown} | "
+        f"粮食: {state.food:.1f} | 士气: {state.morale}/100 | "
+        f"兵力: {current_soldiers}/{state.max_army_size} | 封地: {len(state.fiefs)}"
+    )
 
     market_str = format_market_info(curr_info)
     if market_str:
@@ -55,6 +86,10 @@ def render_location_header(state):
     barracks_str = format_barracks_info(curr_info)
     if barracks_str:
         print(barracks_str)
+
+    tavern_str = format_tavern_info(curr_info)
+    if tavern_str:
+        print(tavern_str)
 
     neighbor_ids = curr_info.get("neighbors", [])
     neighbor_names = []
@@ -69,18 +104,41 @@ def render_location_header(state):
 
 
 def render_status(state):
-    """显示玩家当前的军队与背包状态信息。"""
+    """显示玩家当前的军队、背包、同伴与封地状态信息。"""
     curr_info = LOCATIONS.get(state.location, {})
     loc_name = curr_info.get("name", state.location)
     army_power = calculate_army_power(state.troops)
+    current_soldiers = sum(state.troops.values())
 
     print("\n" + "-" * 40)
     print("【当前详细状态】")
     print(f"当前时间: 第 {state.day} 天")
     print(f"所在位置: {loc_name}")
     print(f"金币数量: {state.gold}")
+    print(f"玩家声望: {state.renown}")
+    print(f"粮食储备: {state.food:.1f}")
     print(f"部队士气: {state.morale}/100")
+    print(f"带兵数量: {current_soldiers}/{state.max_army_size}")
     print(f"军队总战力: {army_power}")
+
+    print("\n[已招募同伴]")
+    if state.companions:
+        for c_id in state.companions:
+            c_info = COMPANIONS.get(c_id, {})
+            c_name = c_info.get("name", c_id)
+            print(f"  - {c_name} ({c_id})")
+    else:
+        print("  暂无同伴")
+
+    print("\n[领地/封地]")
+    if state.fiefs:
+        for f_id in state.fiefs:
+            f_info = LOCATIONS.get(f_id, {})
+            f_name = f_info.get("name", f_id)
+            f_tax = f_info.get("tax_income", 0)
+            print(f"  - {f_name} ({f_id}) [每日税收: {f_tax} 金]")
+    else:
+        print("  暂无封地")
 
     print("\n[部队成员]")
     has_troops = False
@@ -156,6 +214,33 @@ def handle_combat_encounter(state, event_data):
         print(f"获得战利品: {result['gold_gained']} 金币")
     print("*" * 40)
 
+    # 如果战斗胜利，且当前地点类型是城镇或村庄，弹出占领/掠夺/离开选项
+    curr_loc = LOCATIONS.get(state.location, {})
+    if result["victory"] and curr_loc.get("type") in ["town", "village"]:
+        loc_name = curr_loc.get("name", state.location)
+        print("\n" + "=" * 40)
+        print(f"胜利！你可以对 [{loc_name}] 采取后续行动：")
+        print("  [1] 掠夺 (得钱扣声望)")
+        print("  [2] 占领 (需50声望，得封地)")
+        print("  [3] 离开")
+        print("=" * 40)
+
+        while True:
+            post_choice = input("请选择行动 [1-3] > ").strip()
+            if post_choice in ["1", "掠夺", "loot"]:
+                res = conquer_location(state, state.location, "loot")
+                print(f"\n{res}")
+                break
+            elif post_choice in ["2", "占领", "occupy"]:
+                res = conquer_location(state, state.location, "occupy")
+                print(f"\n{res}")
+                break
+            elif post_choice in ["3", "离开", "leave"]:
+                print(f"\n你选择了离开 [{loc_name}]。")
+                break
+            else:
+                print("无效的选择，请输入 1、2 或 3。")
+
 
 def resolve_location_target(target_arg):
     """将输入的地点名称或ID解析为对应的地点ID。"""
@@ -178,10 +263,11 @@ def start_cli(state):
         render_location_header(state)
         print("\n可用指令:")
         print("  move <地点名/ID>         - 移动到相邻地点")
-        print("  buy <商品id> <数量>       - 购买商品")
+        print("  buy <商品/grain> <数量>   - 购买商品或粮草")
         print("  sell <商品id> <数量>      - 卖出商品")
         print("  recruit <兵种id> <数量>   - 招募士兵")
         print("  upgrade <兵种id> <数量>   - 晋升兵种")
+        print("  hire <同伴id>            - 招募酒馆同伴")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
         print("  q                        - 退出游戏")
@@ -202,6 +288,16 @@ def start_cli(state):
 
         elif cmd == "rest":
             rest(state)
+            daily_report = daily_update(state)
+            print(f"\n{daily_report}")
+
+        elif cmd == "hire":
+            if len(parts) < 2:
+                print("请指定同伴ID！例如: hire c1")
+                continue
+            companion_id = parts[1]
+            res = hire_companion(state, companion_id)
+            print(f"\n{res}")
 
         elif cmd == "buy":
             if len(parts) < 3:
@@ -270,13 +366,17 @@ def start_cli(state):
             success, msg, event_data = move(state, target_id)
             print(f"\n{msg}")
 
-            if success and event_data:
-                if event_data.get("type") == "combat":
-                    handle_combat_encounter(state, event_data)
-                elif event_data.get("type") in ["caravan", "treasure"]:
-                    print(f"【遭遇事件】{event_data.get('description')} 获得 {event_data.get('gold_reward', 0)} 金币！")
-                else:
-                    print(f"【遭遇事件】{event_data.get('description')}")
+            if success:
+                if event_data:
+                    if event_data.get("type") == "combat":
+                        handle_combat_encounter(state, event_data)
+                    elif event_data.get("type") in ["caravan", "treasure"]:
+                        print(f"【遭遇事件】{event_data.get('description')} 获得 {event_data.get('gold_reward', 0)} 金币！")
+                    else:
+                        print(f"【遭遇事件】{event_data.get('description')}")
+
+                daily_report = daily_update(state)
+                print(f"\n{daily_report}")
 
         else:
             print(f"未知指令: '{cmd}'。请输入 'move', 'rest', 'status' 或 'q'。")

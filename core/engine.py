@@ -4,7 +4,153 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS, GOODS
+from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS
+
+
+def hire_companion(state, companion_id):
+    """在当前地点的酒馆招募同伴。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if companion_id not in COMPANIONS:
+        return f"同伴 '{companion_id}' 不存在"
+
+    if companion_id in state.companions:
+        return f"已经招募过同伴 '{COMPANIONS[companion_id]['name']}'"
+
+    comp = COMPANIONS[companion_id]
+    cost = comp.get("cost", 0)
+    req_renown = comp.get("required_renown", 0)
+
+    if state.renown < req_renown:
+        return f"声望不足！招募 '{comp['name']}' 需要 {req_renown} 声望，当前声望：{state.renown}"
+
+    if state.cash < cost:
+        return f"金钱不足！招募 '{comp['name']}' 需要 {cost} 金，当前金钱：{state.cash}"
+
+    state.cash -= cost
+    state.companions.append(companion_id)
+
+    bonus_type = comp.get("bonus_type")
+    bonus_value = comp.get("bonus_value", 0)
+
+    if bonus_type == "combat":
+        state.max_army_size += int(bonus_value)
+    elif bonus_type == "morale":
+        state.morale = min(100, state.morale + int(bonus_value))
+
+    msg = f"成功招募同伴 '{comp['name']}'！花费 {cost} 金。"
+    state.add_log(msg)
+    return msg
+
+
+def conquer_location(state, location_id, action):
+    """掠夺或占领地点。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    if action == "loot":
+        tax = loc.get("tax_income", 20)
+        loot_gold = tax * 10
+        state.cash += loot_gold
+        state.renown = max(0, state.renown - 10)
+        loc["owner"] = "looted"
+        msg = f"对 [{loc['name']}] 进行了掠夺！获得 {loot_gold} 金币，声望减少 10 点。"
+        state.add_log(msg)
+        return msg
+
+    elif action == "occupy":
+        if loc.get("owner") == "looted":
+            return f"[{loc['name']}] 已被掠夺破坏，无法再占领！"
+
+        if state.renown < 50:
+            return f"声望不足，无法占领 [{loc['name']}]！需要 50 声望，当前声望：{state.renown}。"
+
+        loc["owner"] = "player"
+        if location_id not in state.fiefs:
+            state.fiefs.append(location_id)
+        state.renown += 20
+        msg = f"成功占领 [{loc['name']}]！声望增加 20 点，该地点已成为你的封地。"
+        state.add_log(msg)
+        return msg
+
+    else:
+        return f"未知的征服行为 '{action}'"
+
+
+def daily_update(state):
+    """每日结算：收税、耗粮与士气/解散判定。
+
+    返回:
+        str: 每日结算报告字符串
+    """
+    # 1. 收税
+    tax_income = 0
+    for fief_id in state.fiefs:
+        f_info = LOCATIONS.get(fief_id, {})
+        tax_income += f_info.get("tax_income", 0)
+    state.cash += tax_income
+
+    # 2. 耗粮
+    total_food_consumed = 0.0
+    for unit_id, count in state.troops.items():
+        if count > 0:
+            u_info = UNITS.get(unit_id, {})
+            rate = u_info.get("food_consumption", 1.0)
+            total_food_consumed += count * rate
+
+    state.food -= total_food_consumed
+
+    disband_msg = ""
+    # 3. 士气与粮草断绝判定
+    if state.food < 0:
+        state.food = 0.0
+        state.morale = max(0, state.morale - 20)
+
+    if state.morale <= 0:
+        # 强制解散一半兵力（从低级兵开始）
+        total_soldiers = sum(state.troops.values())
+        to_disband = total_soldiers // 2
+        remaining_disband = to_disband
+        disbanded_detail = {}
+
+        priority_order = ["peasant", "archer", "infantry"]
+        for unit_id in priority_order:
+            if unit_id in state.troops and state.troops[unit_id] > 0 and remaining_disband > 0:
+                loss = min(state.troops[unit_id], remaining_disband)
+                state.troops[unit_id] -= loss
+                remaining_disband -= loss
+                disbanded_detail[unit_id] = loss
+
+        for unit_id in state.troops:
+            if remaining_disband <= 0:
+                break
+            if state.troops[unit_id] > 0:
+                loss = min(state.troops[unit_id], remaining_disband)
+                state.troops[unit_id] -= loss
+                remaining_disband -= loss
+                disbanded_detail[unit_id] = loss
+
+        state.morale = 50
+        disband_parts = [f"{UNITS.get(uid, {}).get('name', uid)} {cnt} 人" for uid, cnt in disbanded_detail.items() if cnt > 0]
+        disband_str = "、".join(disband_parts) if disband_parts else "无"
+        disband_msg = f"军队士气归零崩盘！解散了半数军队（{to_disband} 人: {disband_str}），士气恢复至 50。"
+
+    report = (
+        f"【每日结算】税收增加：{tax_income} 金 | 耗粮：{total_food_consumed:.1f} | "
+        f"当前粮食：{state.food:.1f} | 当前士气：{state.morale}"
+    )
+    if disband_msg:
+        report += f"\n【惩罚警告】{disband_msg}"
+
+    state.add_log(report)
+    return report
 
 
 def calculate_army_power(troops):
@@ -247,6 +393,27 @@ def trade(state, location_id, action, goods_id, quantity):
     if not loc:
         return f"地点 '{location_id}' 不存在"
 
+    # 计算同伴交易收益加成
+    trade_bonus = 0.0
+    for c_id in state.companions:
+        c_info = COMPANIONS.get(c_id, {})
+        if c_info.get("bonus_type") == "trade":
+            trade_bonus += c_info.get("bonus_value", 0.0)
+
+    # 特殊支持买粮食指令: buy grain [数量]
+    if goods_id in ["grain", "food"]:
+        if action == "buy":
+            buy_price = 10
+            total_cost = buy_price * quantity
+            if state.cash < total_cost:
+                return f"金钱不足！购买 {quantity} 单位粮食需要 {total_cost} 金，当前金钱：{state.cash}"
+            state.cash -= total_cost
+            food_gained = quantity * 10
+            state.food += food_gained
+            msg = f"成功购买 {quantity} 单位粮食（获得 {food_gained} 粮食），花费 {total_cost} 金"
+            state.add_log(msg)
+            return msg
+
     market = loc.get("market", {})
     if not market or goods_id not in market:
         goods_name = GOODS.get(goods_id, {}).get("name", goods_id)
@@ -268,7 +435,8 @@ def trade(state, location_id, action, goods_id, quantity):
         return msg
 
     elif action == "sell":
-        sell_price = price_info.get("sell_price", 0)
+        base_sell_price = price_info.get("sell_price", 0)
+        sell_price = int(base_sell_price * (1.0 + trade_bonus))
         current_amount = state.inventory.get(goods_id, 0)
         if current_amount < quantity:
             return f"{goods_name} 数量不足！当前持有：{current_amount}，尝试卖出：{quantity}"
@@ -276,6 +444,8 @@ def trade(state, location_id, action, goods_id, quantity):
         state.inventory[goods_id] -= quantity
         state.cash += total_income
         msg = f"成功卖出 {quantity} {goods_name}，获得 {total_income} 金"
+        if trade_bonus > 0:
+            msg += f"（含同伴交易加成 +{int(trade_bonus * 100)}%）"
         state.add_log(msg)
         return msg
 
@@ -301,6 +471,10 @@ def recruit(state, location_id, unit_id, quantity):
         unit_name = UNITS.get(unit_id, {}).get("name", unit_id)
         return f"{loc.get('name', location_id)} 的兵营不可招募 '{unit_name}'"
 
+    current_army_count = sum(state.troops.values())
+    if current_army_count + quantity > state.max_army_size:
+        return f"超出带兵上限！当前兵力：{current_army_count}，上限：{state.max_army_size}，无法招募 {quantity} 人"
+
     unit_info = UNITS.get(unit_id, {})
     unit_name = unit_info.get("name", unit_id)
     cost_per_unit = unit_info.get("recruit_cost", 0)
@@ -310,7 +484,7 @@ def recruit(state, location_id, unit_id, quantity):
         return f"金钱不足！招募 {quantity} {unit_name} 需要 {total_cost} 金，当前金钱：{state.cash}"
 
     state.cash -= total_cost
-    state.army[unit_id] = state.army.get(unit_id, 0) + quantity
+    state.troops[unit_id] = state.troops.get(unit_id, 0) + quantity
     msg = f"成功招募 {quantity} {unit_name}，花费 {total_cost} 金"
     state.add_log(msg)
     return msg
@@ -325,7 +499,7 @@ def upgrade_unit(state, unit_id, quantity):
     if quantity <= 0:
         return "晋升数量必须大于 0"
 
-    current_count = state.army.get(unit_id, 0)
+    current_count = state.troops.get(unit_id, 0)
     unit_info = UNITS.get(unit_id, {})
     unit_name = unit_info.get("name", unit_id)
 
@@ -345,8 +519,8 @@ def upgrade_unit(state, unit_id, quantity):
         return f"金钱不足！晋升 {quantity} {unit_name} 需要 {total_cost} 金，当前金钱：{state.cash}"
 
     state.cash -= total_cost
-    state.army[unit_id] -= quantity
-    state.army[upgrade_to_id] = state.army.get(upgrade_to_id, 0) + quantity
+    state.troops[unit_id] -= quantity
+    state.troops[upgrade_to_id] = state.troops.get(upgrade_to_id, 0) + quantity
     msg = f"成功将 {quantity} {unit_name} 晋升为 {quantity} {target_name}，花费 {total_cost} 金"
     state.add_log(msg)
     return msg
