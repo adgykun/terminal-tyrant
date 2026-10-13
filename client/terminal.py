@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT
 from core.engine import (
     move,
     rest,
@@ -12,6 +12,9 @@ from core.engine import (
     hire_companion,
     conquer_location,
     daily_update,
+    sell_prisoners,
+    recruit_prisoner,
+    arena_fight,
 )
 
 TYPE_NAMES = {
@@ -104,10 +107,16 @@ def render_location_header(state):
 
 
 def render_status(state):
-    """显示玩家当前的军队、背包、同伴与封地状态信息。"""
+    """显示玩家当前的军队、装备、俘虏、背包、同伴与封地状态信息。"""
     curr_info = LOCATIONS.get(state.location, {})
     loc_name = curr_info.get("name", state.location)
+    eq_bonus = sum(
+        EQUIPMENT[eq_id]["power_bonus"]
+        for eq_id in state.equipment.values()
+        if eq_id in EQUIPMENT
+    )
     army_power = calculate_army_power(state.troops)
+    total_power = army_power + state.personal_power + eq_bonus
     current_soldiers = sum(state.troops.values())
 
     print("\n" + "-" * 40)
@@ -119,7 +128,29 @@ def render_status(state):
     print(f"粮食储备: {state.food:.1f}")
     print(f"部队士气: {state.morale}/100")
     print(f"带兵数量: {current_soldiers}/{state.max_army_size}")
-    print(f"军队总战力: {army_power}")
+    print(f"个人战力: {state.personal_power} | 装备加成: +{eq_bonus}")
+    print(f"军队总战力: {army_power} | 综合战力: {total_power}")
+
+    print("\n[玩家装备]")
+    if state.equipment:
+        for eq_type, eq_id in state.equipment.items():
+            eq_info = EQUIPMENT.get(eq_id, {})
+            eq_name = eq_info.get("name", eq_id)
+            eq_power = eq_info.get("power_bonus", 0)
+            print(f"  - [{eq_type}]: {eq_name} (战力 +{eq_power})")
+    else:
+        print("  未穿戴装备")
+
+    print("\n[俘虏列表]")
+    has_prisoners = False
+    for u_id, p_cnt in state.prisoners.items():
+        if p_cnt > 0:
+            u_name = UNITS.get(u_id, {}).get("name", u_id)
+            val = UNITS.get(u_id, {}).get("prisoner_value", 3)
+            print(f"  - {u_name}俘虏 ({u_id}): {p_cnt} 人 (回收单价: {val} 金)")
+            has_prisoners = True
+    if not has_prisoners:
+        print("  无俘虏")
 
     print("\n[已招募同伴]")
     if state.companions:
@@ -211,7 +242,30 @@ def handle_combat_encounter(state, event_data):
                 t_name = UNITS.get(t_id, {}).get("name", t_id)
                 print(f"  - {t_name}: 损失 {cnt} 人")
     if result["gold_gained"] > 0:
-        print(f"获得战利品: {result['gold_gained']} 金币")
+        print(f"获得金币战利品: {result['gold_gained']} 金币")
+
+    if result.get("loot_gained"):
+        print("掉落装备战利品:")
+        for item in result["loot_gained"]:
+            eq_type = item.get("type")
+            eq_name = item.get("name")
+            eq_power = item.get("power_bonus", 0)
+            eq_price = item.get("price", 0)
+            print(f"  - 装备: {eq_name} (类型: {eq_type}, 战力 +{eq_power})")
+            if eq_type not in state.equipment or not state.equipment[eq_type]:
+                state.equipment[eq_type] = item["id"]
+                print(f"    -> 自动穿戴 [{eq_name}]！（战力 +{eq_power}）")
+            else:
+                state.gold += eq_price
+                print(f"    -> 已有同类型装备，放入背包（自动卖钱变现 +{eq_price} 金币）")
+
+    if result.get("prisoners_gained"):
+        print("捕获俘虏:")
+        for p_id, p_cnt in result["prisoners_gained"].items():
+            if p_cnt > 0:
+                p_name = UNITS.get(p_id, {}).get("name", p_id)
+                print(f"  - {p_name}俘虏: {p_cnt} 人")
+
     print("*" * 40)
 
     # 如果战斗胜利，且当前地点类型是城镇或村庄，弹出占领/掠夺/离开选项
@@ -268,6 +322,9 @@ def start_cli(state):
         print("  recruit <兵种id> <数量>   - 招募士兵")
         print("  upgrade <兵种id> <数量>   - 晋升兵种")
         print("  hire <同伴id>            - 招募酒馆同伴")
+        print("  sell_prisoner <兵种id> <数量> - 出售俘虏")
+        print("  recruit_prisoner <兵种id> <数量> - 招募俘虏为士兵")
+        print("  arena <轮数>            - 竞技场打擂")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
         print("  q                        - 退出游戏")
@@ -349,6 +406,44 @@ def start_cli(state):
                 print("数量必须是有效数字！")
                 continue
             res = upgrade_unit(state, unit_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd in ["sell_prisoner", "sell_prisoners"]:
+            if len(parts) < 3:
+                print("请指定兵种ID和数量！例如: sell_prisoner peasant 5")
+                continue
+            unit_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = sell_prisoners(state, state.location, unit_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd in ["recruit_prisoner", "recruit_prisoners"]:
+            if len(parts) < 3:
+                print("请指定兵种ID和数量！例如: recruit_prisoner peasant 5")
+                continue
+            unit_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = recruit_prisoner(state, unit_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd == "arena":
+            if len(parts) < 2:
+                print("请指定打擂轮数！例如: arena 3")
+                continue
+            try:
+                rounds = int(parts[1])
+            except ValueError:
+                print("轮数必须是有效数字！")
+                continue
+            res = arena_fight(state, state.location, rounds)
             print(f"\n{res}")
 
         elif cmd == "move":

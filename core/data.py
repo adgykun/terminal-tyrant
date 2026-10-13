@@ -1,4 +1,49 @@
-"""数据定义模块：包含兵种、地图地点与随机事件配置。"""
+"""数据定义模块：包含装备、兵种、地图地点与随机事件配置。"""
+
+EQUIPMENT = {
+    "w1": {
+        "id": "w1",
+        "name": "铁剑",
+        "type": "weapon",
+        "power_bonus": 5,
+        "price": 200,
+    },
+    "w2": {
+        "id": "w2",
+        "name": "方天画戟",
+        "type": "weapon",
+        "power_bonus": 15,
+        "price": 800,
+    },
+    "a1": {
+        "id": "a1",
+        "name": "皮甲",
+        "type": "armor",
+        "power_bonus": 3,
+        "price": 150,
+    },
+    "a2": {
+        "id": "a2",
+        "name": "铁甲",
+        "type": "armor",
+        "power_bonus": 8,
+        "price": 400,
+    },
+    "h1": {
+        "id": "h1",
+        "name": "的卢",
+        "type": "horse",
+        "power_bonus": 5,
+        "price": 300,
+    },
+    "h2": {
+        "id": "h2",
+        "name": "赤兔",
+        "type": "horse",
+        "power_bonus": 12,
+        "price": 700,
+    },
+}
 
 COMPANIONS = {
     "c1": {
@@ -36,6 +81,7 @@ UNITS = {
         "upgrade_to": "infantry",
         "promotion_target": "infantry",
         "food_consumption": 0.5,
+        "prisoner_value": 3,
     },
     "infantry": {
         "name": "步兵",
@@ -45,6 +91,7 @@ UNITS = {
         "upgrade_to": None,
         "promotion_target": None,
         "food_consumption": 1.0,
+        "prisoner_value": 9,
     },
     "archer": {
         "name": "弓箭手",
@@ -54,6 +101,7 @@ UNITS = {
         "upgrade_to": None,
         "promotion_target": None,
         "food_consumption": 0.8,
+        "prisoner_value": 7,
     },
 }
 
@@ -64,6 +112,7 @@ LOCATIONS = {
         "type": "village",
         "owner": "neutral",
         "tax_income": 20,
+        "slave_market": True,
         "neighbors": ["river_town", "pine_village"],
         "market": {
             "wheat": {"buy_price": 10, "sell_price": 5},
@@ -76,6 +125,7 @@ LOCATIONS = {
         "type": "village",
         "owner": "neutral",
         "tax_income": 20,
+        "slave_market": True,
         "neighbors": ["oak_village", "iron_town"],
         "market": {
             "wheat": {"buy_price": 10, "sell_price": 5},
@@ -88,6 +138,8 @@ LOCATIONS = {
         "type": "town",
         "owner": "neutral",
         "tax_income": 50,
+        "arena": True,
+        "slave_market": True,
         "tavern": ["c1", "c3"],
         "neighbors": ["oak_village", "wild_forest", "central_city"],
         "market": {
@@ -102,6 +154,8 @@ LOCATIONS = {
         "type": "town",
         "owner": "neutral",
         "tax_income": 50,
+        "arena": True,
+        "slave_market": True,
         "tavern": ["c2"],
         "neighbors": ["pine_village", "wild_mountain", "central_city"],
         "market": {
@@ -114,6 +168,7 @@ LOCATIONS = {
         "id": "wild_forest",
         "name": "迷雾森林",
         "type": "wild",
+        "slave_market": True,
         "neighbors": ["river_town", "wild_mountain"],
         "market": {},
         "barracks": [],
@@ -122,6 +177,7 @@ LOCATIONS = {
         "id": "wild_mountain",
         "name": "黑风山",
         "type": "wild",
+        "slave_market": True,
         "neighbors": ["iron_town", "wild_forest"],
         "market": {},
         "barracks": [],
@@ -132,6 +188,8 @@ LOCATIONS = {
         "type": "town",
         "owner": "neutral",
         "tax_income": 100,
+        "arena": True,
+        "slave_market": True,
         "tavern": ["c1", "c2", "c3"],
         "neighbors": ["river_town", "iron_town"],
         "market": {
