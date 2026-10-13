@@ -4,7 +4,7 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS
+from core.data import LOCATIONS, EVENTS, UNITS, GOODS
 
 
 def calculate_army_power(troops):
@@ -232,3 +232,121 @@ def resolve_combat_simple(state, enemy_power, choice):
 
     else:
         raise ValueError(f"未知的战斗决策: {choice}")
+
+
+def trade(state, location_id, action, goods_id, quantity):
+    """在指定地点的市场交易商品（买入/卖出）。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "交易数量必须大于 0"
+
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    market = loc.get("market", {})
+    if not market or goods_id not in market:
+        goods_name = GOODS.get(goods_id, {}).get("name", goods_id)
+        return f"{loc.get('name', location_id)} 的市场不提供商品 '{goods_name}' 的买卖"
+
+    goods_info = GOODS.get(goods_id, {})
+    goods_name = goods_info.get("name", goods_id)
+    price_info = market[goods_id]
+
+    if action == "buy":
+        buy_price = price_info.get("buy_price", 0)
+        total_cost = buy_price * quantity
+        if state.cash < total_cost:
+            return f"金钱不足！购买 {quantity} {goods_name} 需要 {total_cost} 金，当前金钱：{state.cash}"
+        state.cash -= total_cost
+        state.inventory[goods_id] = state.inventory.get(goods_id, 0) + quantity
+        msg = f"成功购买 {quantity} {goods_name}，花费 {total_cost} 金"
+        state.add_log(msg)
+        return msg
+
+    elif action == "sell":
+        sell_price = price_info.get("sell_price", 0)
+        current_amount = state.inventory.get(goods_id, 0)
+        if current_amount < quantity:
+            return f"{goods_name} 数量不足！当前持有：{current_amount}，尝试卖出：{quantity}"
+        total_income = sell_price * quantity
+        state.inventory[goods_id] -= quantity
+        state.cash += total_income
+        msg = f"成功卖出 {quantity} {goods_name}，获得 {total_income} 金"
+        state.add_log(msg)
+        return msg
+
+    else:
+        return f"未知的交易操作 '{action}'"
+
+
+def recruit(state, location_id, unit_id, quantity):
+    """在指定地点的兵营招募士兵。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "招募数量必须大于 0"
+
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    barracks = loc.get("barracks", [])
+    if unit_id not in barracks:
+        unit_name = UNITS.get(unit_id, {}).get("name", unit_id)
+        return f"{loc.get('name', location_id)} 的兵营不可招募 '{unit_name}'"
+
+    unit_info = UNITS.get(unit_id, {})
+    unit_name = unit_info.get("name", unit_id)
+    cost_per_unit = unit_info.get("recruit_cost", 0)
+    total_cost = cost_per_unit * quantity
+
+    if state.cash < total_cost:
+        return f"金钱不足！招募 {quantity} {unit_name} 需要 {total_cost} 金，当前金钱：{state.cash}"
+
+    state.cash -= total_cost
+    state.army[unit_id] = state.army.get(unit_id, 0) + quantity
+    msg = f"成功招募 {quantity} {unit_name}，花费 {total_cost} 金"
+    state.add_log(msg)
+    return msg
+
+
+def upgrade_unit(state, unit_id, quantity):
+    """将现有部队兵种晋升为高级兵种。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "晋升数量必须大于 0"
+
+    current_count = state.army.get(unit_id, 0)
+    unit_info = UNITS.get(unit_id, {})
+    unit_name = unit_info.get("name", unit_id)
+
+    if current_count < quantity:
+        return f"兵员不足！当前拥有 {unit_name}：{current_count}，尝试晋升：{quantity}"
+
+    upgrade_to_id = unit_info.get("upgrade_to")
+    if not upgrade_to_id or upgrade_to_id not in UNITS:
+        return f"兵种 '{unit_name}' 无法继续晋升"
+
+    target_info = UNITS.get(upgrade_to_id, {})
+    target_name = target_info.get("name", upgrade_to_id)
+    upgrade_cost_per_unit = unit_info.get("upgrade_cost", 0)
+    total_cost = upgrade_cost_per_unit * quantity
+
+    if state.cash < total_cost:
+        return f"金钱不足！晋升 {quantity} {unit_name} 需要 {total_cost} 金，当前金钱：{state.cash}"
+
+    state.cash -= total_cost
+    state.army[unit_id] -= quantity
+    state.army[upgrade_to_id] = state.army.get(upgrade_to_id, 0) + quantity
+    msg = f"成功将 {quantity} {unit_name} 晋升为 {quantity} {target_name}，花费 {total_cost} 金"
+    state.add_log(msg)
+    return msg
