@@ -13,6 +13,24 @@ class GameState:
         self.inventory = inventory if inventory is not None else {"wheat": 0, "iron": 0}
         self.logs = logs if logs is not None else []
 
+    @property
+    def cash(self):
+        """金钱属性别名，指向 gold。"""
+        return self.gold
+
+    @cash.setter
+    def cash(self, value):
+        self.gold = value
+
+    @property
+    def army(self):
+        """部队属性别名，指向 troops。"""
+        return self.troops
+
+    @army.setter
+    def army(self, value):
+        self.troops = value
+
     def add_log(self, message):
         """记录一条事件日志。"""
         log_entry = f"[第 {self.day} 天] {message}"

@@ -1,13 +1,40 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
 from core.data import LOCATIONS, UNITS, GOODS
-from core.engine import move, rest, resolve_combat_simple, calculate_army_power
+from core.engine import move, rest, resolve_combat_simple, calculate_army_power, trade, recruit, upgrade_unit
 
 TYPE_NAMES = {
     "village": "村庄",
     "town": "城镇",
     "wild": "野外",
 }
+
+
+def format_market_info(loc_info):
+    """格式化地点的市场信息。"""
+    market = loc_info.get("market", {})
+    if not market:
+        return None
+    items = []
+    for g_id, price in market.items():
+        g_name = GOODS.get(g_id, {}).get("name", g_id)
+        buy_p = price.get("buy_price", 0)
+        sell_p = price.get("sell_price", 0)
+        items.append(f"{g_name}(买{buy_p}/卖{sell_p})")
+    return f"【市场】可买卖：{', '.join(items)}"
+
+
+def format_barracks_info(loc_info):
+    """格式化地点的兵营信息。"""
+    barracks = loc_info.get("barracks", [])
+    if not barracks:
+        return None
+    items = []
+    for u_id in barracks:
+        u_name = UNITS.get(u_id, {}).get("name", u_id)
+        cost = UNITS.get(u_id, {}).get("recruit_cost", 0)
+        items.append(f"{u_name}({cost}金)")
+    return f"【兵营】可招募：{', '.join(items)}"
 
 
 def render_location_header(state):
@@ -19,7 +46,15 @@ def render_location_header(state):
 
     print("\n" + "=" * 45)
     print(f"【三国大地图】 第 {state.day} 天")
-    print(f"你位于 [{loc_name}] ({loc_type}) | 部队士气: {state.morale}/100 | 金币: {state.gold}")
+    print(f"你来到了 [{loc_name}]。 ({loc_type}) | 部队士气: {state.morale}/100 | 金币: {state.gold}")
+
+    market_str = format_market_info(curr_info)
+    if market_str:
+        print(market_str)
+
+    barracks_str = format_barracks_info(curr_info)
+    if barracks_str:
+        print(barracks_str)
 
     neighbor_ids = curr_info.get("neighbors", [])
     neighbor_names = []
@@ -142,16 +177,20 @@ def start_cli(state):
     while True:
         render_location_header(state)
         print("\n可用指令:")
-        print("  move <地点名/ID>  - 移动到相邻地点")
-        print("  rest              - 原地休整（恢复士气）")
-        print("  status            - 查看军队与物品状态")
-        print("  q                 - 退出游戏")
+        print("  move <地点名/ID>         - 移动到相邻地点")
+        print("  buy <商品id> <数量>       - 购买商品")
+        print("  sell <商品id> <数量>      - 卖出商品")
+        print("  recruit <兵种id> <数量>   - 招募士兵")
+        print("  upgrade <兵种id> <数量>   - 晋升兵种")
+        print("  rest                     - 原地休整（恢复士气）")
+        print("  status                   - 查看军队与物品状态")
+        print("  q                        - 退出游戏")
 
         user_input = input("\n请输入指令 > ").strip()
         if not user_input:
             continue
 
-        parts = user_input.split(maxsplit=1)
+        parts = user_input.split()
         cmd = parts[0].lower()
 
         if cmd == "q":
@@ -163,6 +202,58 @@ def start_cli(state):
 
         elif cmd == "rest":
             rest(state)
+
+        elif cmd == "buy":
+            if len(parts) < 3:
+                print("请指定商品ID和数量！例如: buy wheat 10")
+                continue
+            goods_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = trade(state, state.location, "buy", goods_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd == "sell":
+            if len(parts) < 3:
+                print("请指定商品ID和数量！例如: sell wheat 10")
+                continue
+            goods_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = trade(state, state.location, "sell", goods_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd == "recruit":
+            if len(parts) < 3:
+                print("请指定兵种ID和数量！例如: recruit peasant 5")
+                continue
+            unit_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = recruit(state, state.location, unit_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd == "upgrade":
+            if len(parts) < 3:
+                print("请指定兵种ID和数量！例如: upgrade peasant 3")
+                continue
+            unit_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = upgrade_unit(state, unit_id, quantity)
+            print(f"\n{res}")
 
         elif cmd == "move":
             if len(parts) < 2:
