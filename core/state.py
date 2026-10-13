@@ -29,6 +29,7 @@ class GameState:
         kingdom_name="",
         current_policy=None,
         lords=None,
+        log_history=None,
     ):
         self.day = day
         self.gold = gold
@@ -53,6 +54,7 @@ class GameState:
         self.kingdom_name = kingdom_name
         self.current_policy = current_policy
         self.lords = lords if lords is not None else []
+        self.log_history = log_history if log_history is not None else []
 
     @property
     def cash(self):
@@ -103,6 +105,7 @@ class GameState:
             "kingdom_name": self.kingdom_name,
             "current_policy": self.current_policy,
             "lords": list(self.lords),
+            "log_history": [dict(e) for e in self.log_history],
         }
 
     @classmethod
@@ -132,6 +135,7 @@ class GameState:
             kingdom_name=data.get("kingdom_name", ""),
             current_policy=data.get("current_policy", None),
             lords=data.get("lords", []),
+            log_history=data.get("log_history", []),
         )
 
     def save(self, filepath):

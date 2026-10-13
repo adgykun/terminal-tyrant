@@ -2,6 +2,7 @@
 
 from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES
 from core.engine import (
+    add_log,
     move,
     rest,
     resolve_combat_simple,
@@ -27,6 +28,44 @@ TYPE_NAMES = {
     "town": "城镇",
     "wild": "野外",
 }
+
+
+def draw_map(state):
+    """渲染 20x20 的 ASCII 大地图。"""
+    grid_size = 20
+    grid = [["." for _ in range(grid_size)] for _ in range(grid_size)]
+
+    # 标记所有地点
+    for loc_id, loc_info in LOCATIONS.items():
+        x = loc_info.get("x", 0)
+        y = loc_info.get("y", 0)
+        gx = min(grid_size - 1, max(0, int(x / 5)))
+        gy = min(grid_size - 1, max(0, int(y / 5)))
+
+        loc_type = loc_info.get("type")
+        if loc_type == "town":
+            symbol = "T"
+        elif loc_type == "village":
+            symbol = "V"
+        elif loc_type == "wild":
+            symbol = "W"
+        else:
+            symbol = "?"
+        grid[gy][gx] = symbol
+
+    # 标记玩家当前位置
+    curr_loc = LOCATIONS.get(state.location)
+    if curr_loc:
+        px = curr_loc.get("x", 0)
+        py = curr_loc.get("y", 0)
+        gx = min(grid_size - 1, max(0, int(px / 5)))
+        gy = min(grid_size - 1, max(0, int(py / 5)))
+        grid[gy][gx] = "@"
+
+    print("\n" + "=" * 18 + " 【三国简易大地图】 " + "=" * 18)
+    for row in grid:
+        print(" ".join(row))
+    print("=" * 52)
 
 
 def format_market_info(loc_info):
@@ -370,6 +409,7 @@ def start_cli(state):
     print("欢迎来到《终端暴君：三国群英》！大地图系统已启动。")
 
     while True:
+        draw_map(state)
         render_location_header(state)
         print("\n可用指令:")
         print("  move <地点名/ID>         - 移动到相邻地点")
@@ -390,6 +430,7 @@ def start_cli(state):
         print("  policy set <政策id>      - 制定国家政策")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
+        print("  log [all]                - 查看历史行动日志（帝王本纪）")
         print("  q                        - 退出游戏")
 
         user_input = input("\n请输入指令 > ").strip()
@@ -405,6 +446,23 @@ def start_cli(state):
 
         elif cmd == "status":
             render_status(state)
+
+        elif cmd == "log":
+            if len(parts) > 1 and parts[1].lower() == "all":
+                print("\n【帝王本纪 - 全部历史日志】")
+                if state.log_history:
+                    for entry in state.log_history:
+                        print(f"  [第 {entry['day']} 天] {entry['event']}")
+                else:
+                    print("  暂无历史日志记录。")
+            else:
+                print("\n【帝王本纪 - 最近 10 条日志】")
+                if state.log_history:
+                    recent_logs = state.log_history[-10:]
+                    for entry in recent_logs:
+                        print(f"  [第 {entry['day']} 天] {entry['event']}")
+                else:
+                    print("  暂无历史日志记录。")
 
         elif cmd == "quest":
             if len(parts) < 2:
