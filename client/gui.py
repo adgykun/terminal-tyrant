@@ -73,7 +73,7 @@ class GUIClient:
         self.font_small = get_font(14)
         self.font_large = get_font(24)
 
-        # UI 状态与弹窗 (None, 'shop', 'recruit', 'combat', 'combat_result')
+        # UI 状态与弹窗 (None, 'shop', 'recruit', 'tavern', 'smithy', 'arena', 'combat', 'combat_result')
         self.overlay = None
         self.combat_event = None
         self.combat_result = None
@@ -238,6 +238,9 @@ class GUIClient:
             "[点击] 移动至相邻地点",
             "[S] 键  商店 / 市场",
             "[R] 键  兵营招募",
+            "[T] 键  酒馆 (喝酒/传闻)",
+            "[M] 键  铁匠铺 (升级)",
+            "[A] 键  竞技场 (打擂/押注)",
             "[F] 键  钓鱼 (需在水边)",
             "[ESC]  关闭弹窗 / 退出",
         ]
@@ -407,6 +410,125 @@ class GUIClient:
             self.overlay = None
         self.draw_button(btn_close, "返回地图 (ESC)", close_recruit)
 
+    def render_tavern_overlay(self):
+        """渲染酒馆交互弹窗。"""
+        overlay_rect = pygame.Rect(100, 80, 600, 440)
+        s = pygame.Surface((600, 440), pygame.SRCALPHA)
+        s.fill(COLOR_MODAL_BG)
+        self.screen.blit(s, (100, 80))
+        pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
+
+        y = 100
+        title_surf = self.font_large.render("—— 喧闹酒馆 ——", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
+        y += 45
+
+        res = engine.visit_tavern(self.state)
+        dlg_text = res["welcome"]
+
+        dlg_surf = self.font_main.render(dlg_text, True, COLOR_TEXT)
+        self.screen.blit(dlg_surf, (130, y))
+        y += 45
+
+        pygame.draw.line(self.screen, COLOR_BORDER, (130, y), (670, y), 1)
+        y += 25
+
+        btn_drink = pygame.Rect(160, y, 180, 40)
+        def do_drink():
+            ret = engine.visit_tavern(self.state, "drink", 20)
+            self.message = f"{ret['dialogue']}\n{ret['message']}"
+        self.draw_button(btn_drink, "喝酒 (扣20金/加士气)", do_drink)
+
+        btn_rumor = pygame.Rect(380, y, 180, 40)
+        def do_rumor():
+            ret = engine.visit_tavern(self.state, "rumor")
+            self.message = f"{ret['message']}"
+        self.draw_button(btn_rumor, "打听传闻", do_rumor)
+
+        btn_close = pygame.Rect(340, 460, 120, 35)
+        def close_tavern():
+            self.overlay = None
+        self.draw_button(btn_close, "返回地图 (ESC)", close_tavern)
+
+    def render_smithy_overlay(self):
+        """渲染铁匠铺交互弹窗。"""
+        overlay_rect = pygame.Rect(100, 80, 600, 440)
+        s = pygame.Surface((600, 440), pygame.SRCALPHA)
+        s.fill(COLOR_MODAL_BG)
+        self.screen.blit(s, (100, 80))
+        pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
+
+        y = 100
+        title_surf = self.font_large.render("—— 铁匠铺 ——", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
+        y += 45
+
+        res = engine.visit_smithy(self.state)
+        dlg_text = res["welcome"]
+
+        dlg_surf = self.font_main.render(dlg_text, True, COLOR_TEXT)
+        self.screen.blit(dlg_surf, (130, y))
+        y += 45
+
+        pygame.draw.line(self.screen, COLOR_BORDER, (130, y), (670, y), 1)
+        y += 25
+
+        iron_cnt = self.state.inventory.get("iron", 0)
+        info_str = f"强化需要：100 金 + 1 铁块 | 当前持有：{self.state.gold} 金, {iron_cnt} 铁"
+        self.screen.blit(self.font_main.render(info_str, True, COLOR_WARNING), (130, y))
+        y += 35
+
+        btn_upgrade = pygame.Rect(250, y, 220, 40)
+        def do_upgrade():
+            ret = engine.visit_smithy(self.state, "upgrade")
+            self.message = f"{ret['dialogue']}\n{ret['message']}"
+        self.draw_button(btn_upgrade, "强化兵刃 (+3战力)", do_upgrade)
+
+        btn_close = pygame.Rect(340, 460, 120, 35)
+        def close_smithy():
+            self.overlay = None
+        self.draw_button(btn_close, "返回地图 (ESC)", close_smithy)
+
+    def render_arena_overlay(self):
+        """渲染竞技场交互弹窗。"""
+        overlay_rect = pygame.Rect(100, 80, 600, 440)
+        s = pygame.Surface((600, 440), pygame.SRCALPHA)
+        s.fill(COLOR_MODAL_BG)
+        self.screen.blit(s, (100, 80))
+        pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
+
+        y = 100
+        title_surf = self.font_large.render("—— 热血竞技场 ——", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
+        y += 45
+
+        res = engine.visit_arena(self.state)
+        dlg_text = res["welcome"]
+
+        dlg_surf = self.font_main.render(dlg_text, True, COLOR_TEXT)
+        self.screen.blit(dlg_surf, (130, y))
+        y += 45
+
+        pygame.draw.line(self.screen, COLOR_BORDER, (130, y), (670, y), 1)
+        y += 25
+
+        btn_fight = pygame.Rect(160, y, 180, 40)
+        def do_fight():
+            ret = engine.visit_arena(self.state, "fight")
+            self.message = f"{ret['message']}"
+        self.draw_button(btn_fight, "自己下场打擂 (1轮)", do_fight)
+
+        btn_bet = pygame.Rect(380, y, 180, 40)
+        def do_bet():
+            ret = engine.visit_arena(self.state, "bet", 50)
+            self.message = f"{ret['dialogue']}\n{ret['message']}"
+        self.draw_button(btn_bet, "押注角斗比赛 (50金)", do_bet)
+
+        btn_close = pygame.Rect(340, 460, 120, 35)
+        def close_arena():
+            self.overlay = None
+        self.draw_button(btn_close, "返回地图 (ESC)", close_arena)
+
     def render_combat_overlay(self):
         """渲染战斗抉择与结算弹窗。"""
         overlay_rect = pygame.Rect(120, 100, 560, 400)
@@ -561,6 +683,12 @@ class GUIClient:
                         self.overlay = "shop"
                     elif event.key == pygame.K_r:
                         self.overlay = "recruit"
+                    elif event.key == pygame.K_t:
+                        self.overlay = "tavern"
+                    elif event.key == pygame.K_m:
+                        self.overlay = "smithy"
+                    elif event.key == pygame.K_a:
+                        self.overlay = "arena"
                     elif event.key == pygame.K_f:
                         self.handle_fishing()
 
@@ -595,6 +723,12 @@ class GUIClient:
                 self.render_shop_overlay()
             elif self.overlay == "recruit":
                 self.render_recruit_overlay()
+            elif self.overlay == "tavern":
+                self.render_tavern_overlay()
+            elif self.overlay == "smithy":
+                self.render_smithy_overlay()
+            elif self.overlay == "arena":
+                self.render_arena_overlay()
             elif self.overlay == "combat":
                 self.render_combat_overlay()
 

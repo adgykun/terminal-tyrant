@@ -24,6 +24,9 @@ from core.engine import (
     buy_gear,
     fish,
     sell_fish,
+    visit_tavern,
+    visit_smithy,
+    visit_arena,
 )
 
 TYPE_NAMES = {
@@ -143,6 +146,9 @@ def render_location_header(state):
 
     if state.morale < 30:
         print("⚠️ 士气低落，士兵正在逃跑！")
+
+    if curr_info.get("type") == "town":
+        print("【城镇设施】可访问：[1] 酒馆 (tavern) | [2] 铁匠铺 (smithy) | [3] 竞技场 (arena)")
 
     market_str = format_market_info(curr_info)
     if market_str:
@@ -440,9 +446,11 @@ def start_cli(state):
         print("  recruit <兵种id> <数量>   - 招募士兵")
         print("  upgrade <兵种id> <数量>   - 晋升兵种")
         print("  hire <同伴id>            - 招募酒馆同伴")
+        print("  tavern [drink/rumor]     - 访问酒馆（喝酒恢复士气/听小道消息）")
+        print("  smithy [upgrade]         - 访问铁匠铺（升级装备）")
+        print("  arena [fight/bet <金额>] - 访问竞技场（挑战打擂/押注）")
         print("  sell_prisoner <兵种id> <数量> - 出售俘虏")
         print("  recruit_prisoner <兵种id> <数量> - 招募俘虏为士兵")
-        print("  arena <轮数>            - 竞技场打擂")
         print("  quest list               - 查看当前接取的任务及进度")
         print("  quest accept <任务id>    - 接取任务")
         print("  quest complete <任务id>  - 尝试完成任务")
@@ -722,17 +730,46 @@ def start_cli(state):
             res = recruit_prisoner(state, unit_id, quantity)
             print(f"\n{res}")
 
+        elif cmd == "tavern":
+            sub_act = parts[1].lower() if len(parts) > 1 else None
+            res = visit_tavern(state, action=sub_act)
+            print("\n" + "-" * 40)
+            print(res["welcome"])
+            if sub_act:
+                print(res["dialogue"])
+            print(f"提示: {res['message']}")
+            print("-" * 40)
+
+        elif cmd == "smithy":
+            sub_act = parts[1].lower() if len(parts) > 1 else None
+            res = visit_smithy(state, action=sub_act)
+            print("\n" + "-" * 40)
+            print(res["welcome"])
+            if sub_act:
+                print(res["dialogue"])
+            print(f"提示: {res['message']}")
+            print("-" * 40)
+
         elif cmd == "arena":
-            if len(parts) < 2:
-                print("请指定打擂轮数！例如: arena 3")
-                continue
-            try:
+            if len(parts) >= 2 and parts[1].isdigit():
                 rounds = int(parts[1])
-            except ValueError:
-                print("轮数必须是有效数字！")
-                continue
-            res = arena_fight(state, state.location, rounds)
-            print(f"\n{res}")
+                res = arena_fight(state, state.location, rounds)
+                print(f"\n{res}")
+            else:
+                sub_act = parts[1].lower() if len(parts) > 1 else None
+                bet_amt = 50
+                if sub_act == "bet" and len(parts) >= 3:
+                    try:
+                        bet_amt = int(parts[2])
+                    except ValueError:
+                        bet_amt = 50
+                res = visit_arena(state, action=sub_act, bet_amount=bet_amt)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                if sub_act:
+                    print(res["dialogue"])
+                print(f"提示: {res['message']}")
+                print("-" * 40)
 
         elif cmd == "move":
             if len(parts) < 2:

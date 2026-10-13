@@ -16,7 +16,9 @@ from core.data import (
     POLICIES,
     FISHING_GEAR,
     FISH_LOOT_TABLE,
+    NPC_MERCHANTS,
 )
+from core.dialogue_engine import get_formatted_npc_dialogue
 
 _quest_id_counter = 1
 
@@ -1119,3 +1121,166 @@ def sell_fish(state, item_id, quantity):
     msg = f"成功卖出 {quantity} 个 [{item_name}]，获得 {total_income} 金币。"
     state.add_log(msg)
     return msg
+
+
+def visit_tavern(state, action=None, tip_amount=20):
+    """访问酒馆，与酒馆老板交互并处理喝酒与听传闻选项。"""
+    welcome_dialogue = get_formatted_npc_dialogue("tavern_keeper", "enter_tavern", state)
+
+    if action == "drink":
+        cost = max(10, tip_amount)
+        if state.cash < cost:
+            msg = f"金币不足！在酒馆喝酒需要 {cost} 金，当前只有 {state.cash} 金。"
+            return {
+                "success": False,
+                "welcome": welcome_dialogue,
+                "dialogue": welcome_dialogue,
+                "message": msg,
+            }
+
+        state.cash -= cost
+        state.morale = min(100, state.morale + 10)
+        state.npc_states["tavern_keeper"]["mood"] = "happy"
+        drink_dialogue = get_formatted_npc_dialogue("tavern_keeper", "tavern_drink", state)
+        msg = f"你花了 {cost} 金币痛饮了一杯。老板收了你的钱，脸色好多了！（士气 +10）"
+        state.add_log(msg)
+        return {
+            "success": True,
+            "welcome": welcome_dialogue,
+            "dialogue": drink_dialogue,
+            "message": msg,
+        }
+
+    elif action == "rumor":
+        rumors = [
+            "听说迷雾森林附近近期有匪徒出没，打败他们能拿到不少战利品。",
+            "许昌大都的市场特产丰富，运送麦子过去能卖个好价钱！",
+            "黑风山上的强盗凶悍无比，没有足够的精兵切勿贸然前往。",
+            "竞技场里经常能见到高筹码押注，有眼光的人一晚就能暴富！",
+        ]
+        rumor_text = random.choice(rumors)
+        msg = f"【酒馆小道消息】{rumor_text}"
+        state.add_log(msg)
+        return {
+            "success": True,
+            "welcome": welcome_dialogue,
+            "dialogue": welcome_dialogue,
+            "message": msg,
+        }
+
+    return {
+        "success": True,
+        "welcome": welcome_dialogue,
+        "dialogue": welcome_dialogue,
+        "message": "你走进了喧闹的酒馆。",
+    }
+
+
+def visit_smithy(state, action=None):
+    """访问铁匠铺，与铁匠交互并处理装备升级选项。"""
+    welcome_dialogue = get_formatted_npc_dialogue("blacksmith", "enter_smithy", state)
+
+    if action == "upgrade":
+        cost_gold = 100
+        cost_iron = 1
+        iron_count = state.inventory.get("iron", 0)
+
+        if state.cash < cost_gold or iron_count < cost_iron:
+            state.npc_states["blacksmith"]["mood"] = "angry"
+            taunt_dialogue = get_formatted_npc_dialogue("blacksmith", "blacksmith_no_money", state)
+            msg = f"资源不足！升级装备需要 {cost_gold} 金与 {cost_iron} 单位铁。铁匠见你没钱，气得哼了一声！"
+            state.add_log(msg)
+            return {
+                "success": False,
+                "welcome": welcome_dialogue,
+                "dialogue": taunt_dialogue,
+                "message": msg,
+            }
+
+        state.cash -= cost_gold
+        state.inventory["iron"] -= cost_iron
+        state.personal_power += 3
+        state.npc_states["blacksmith"]["mood"] = "happy"
+        upgrade_dialogue = get_formatted_npc_dialogue("blacksmith", "blacksmith_upgrade", state)
+        msg = "升级成功！铁匠为你打造了更精良的兵刃，个人战力 +3！铁匠收了材料与工钱，心情大好！"
+        state.add_log(msg)
+        return {
+            "success": True,
+            "welcome": welcome_dialogue,
+            "dialogue": upgrade_dialogue,
+            "message": msg,
+        }
+
+    return {
+        "success": True,
+        "welcome": welcome_dialogue,
+        "dialogue": welcome_dialogue,
+        "message": "你走进了火光熊熊的铁匠铺。",
+    }
+
+
+def visit_arena(state, action=None, bet_amount=50):
+    """访问竞技场，与主持人交互并处理自己打或押注选项。"""
+    welcome_dialogue = get_formatted_npc_dialogue("arena_host", "enter_arena", state)
+
+    if action == "fight":
+        report = arena_fight(state, state.location, 1)
+        return {
+            "success": True,
+            "welcome": welcome_dialogue,
+            "dialogue": welcome_dialogue,
+            "message": report,
+        }
+
+    elif action == "bet":
+        if bet_amount <= 0:
+            return {
+                "success": False,
+                "welcome": welcome_dialogue,
+                "dialogue": welcome_dialogue,
+                "message": "押注金额必须大于 0！",
+            }
+
+        if state.cash < bet_amount:
+            msg = f"金币不足！无法下注 {bet_amount} 金币，当前拥有 {state.cash} 金币。"
+            return {
+                "success": False,
+                "welcome": welcome_dialogue,
+                "dialogue": welcome_dialogue,
+                "message": msg,
+            }
+
+        state.cash -= bet_amount
+        win = random.random() < 0.5
+
+        if win:
+            gain = bet_amount * 2
+            state.cash += gain
+            state.npc_states["arena_host"]["mood"] = "happy"
+            win_dialogue = get_formatted_npc_dialogue("arena_host", "arena_bet_win", state)
+            msg = f"押注胜利！赢得了 {gain} 金币（净赚 {bet_amount} 金）。主持人看你赢了大钱，笑脸相迎！"
+            state.add_log(msg)
+            return {
+                "success": True,
+                "welcome": welcome_dialogue,
+                "dialogue": win_dialogue,
+                "message": msg,
+            }
+        else:
+            state.npc_states["arena_host"]["mood"] = "angry"
+            lose_dialogue = get_formatted_npc_dialogue("arena_host", "arena_bet_lose", state)
+            msg = f"押注失败！损失了 {bet_amount} 金币。主持人肆意嘲笑了你的决策！"
+            state.add_log(msg)
+            return {
+                "success": False,
+                "welcome": welcome_dialogue,
+                "dialogue": lose_dialogue,
+                "message": msg,
+            }
+
+    return {
+        "success": True,
+        "welcome": welcome_dialogue,
+        "dialogue": welcome_dialogue,
+        "message": "你来到了热血沸腾的竞技场。",
+    }

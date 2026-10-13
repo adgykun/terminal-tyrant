@@ -6,6 +6,34 @@ LORE = {
 
 PERSONALITY_TRAITS = ["hot_headed", "cautious", "greedy", "loyal", "cowardly"]
 
+ATTITUDE_LEVELS = {
+    "contempt": {"name": "蔑视", "label": "蔑视地", "min_renown": 0, "max_renown": 99},
+    "neutral": {"name": "中立", "label": "平静地", "min_renown": 100, "max_renown": 500},
+    "respect": {"name": "尊敬", "label": "尊敬地", "min_renown": 501, "max_renown": 1000},
+    "fawning": {"name": "谄媚", "label": "谄媚地", "min_renown": 1001, "max_renown": float("inf")},
+}
+
+NPC_MERCHANTS = {
+    "tavern_keeper": {
+        "id": "tavern_keeper",
+        "name": "酒馆老板",
+        "title": "贪婪的酒馆老板",
+        "personality": "greedy",
+    },
+    "blacksmith": {
+        "id": "blacksmith",
+        "name": "铁匠",
+        "title": "暴躁的铁匠",
+        "personality": "hot_headed",
+    },
+    "arena_host": {
+        "id": "arena_host",
+        "name": "竞技场主持人",
+        "title": "谨慎的竞技场主持人",
+        "personality": "cautious",
+    },
+}
+
 FACTIONS = {
     "f1": {
         "id": "f1",
