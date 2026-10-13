@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES, FISHING_GEAR, FISH_LOOT_TABLE
 from core.engine import (
     add_log,
     move,
@@ -21,6 +21,9 @@ from core.engine import (
     declare_kingdom,
     assign_lord,
     set_policy,
+    buy_gear,
+    fish,
+    sell_fish,
 )
 
 TYPE_NAMES = {
@@ -130,11 +133,16 @@ def render_location_header(state):
 
     print("\n" + "=" * 55)
     print(f"【三国大地图】 第 {state.day} 天")
+    rod_str = "已拥有" if state.equipment_gear.get("rod") else "未拥有"
     print(
         f"位置: [{loc_name}] ({loc_type}) | 金币: {state.gold} | 声望: {state.renown} | "
         f"粮食: {state.food:.1f} | 士气: {state.morale}/100 | "
-        f"兵力: {current_soldiers}/{state.max_army_size} | 封地: {len(state.fiefs)}"
+        f"兵力: {current_soldiers}/{state.max_army_size} | 封地: {len(state.fiefs)} | "
+        f"鱼竿: {rod_str} | 饵料: {state.bait_count}"
     )
+
+    if state.morale < 30:
+        print("⚠️ 士气低落，士兵正在逃跑！")
 
     market_str = format_market_info(curr_info)
     if market_str:
@@ -265,6 +273,20 @@ def render_status(state):
         print(f"  - 分封领主: {lords_str}")
     else:
         print("  - 尚未建国")
+
+    print("\n[钓鱼装备与渔获]")
+    rod_status = "已拥有" if state.equipment_gear.get("rod") else "未拥有"
+    print(f"  - 鱼竿: {rod_status} | 饵料数量: {state.bait_count}")
+    has_fish = False
+    for f_id, count in state.fish_inventory.items():
+        if count > 0:
+            f_info = FISH_LOOT_TABLE.get(f_id, {})
+            f_name = f_info.get("name", f_id)
+            f_val = f_info.get("value", 0)
+            print(f"  - {f_name} ({f_id}): {count} (单价: {f_val} 金)")
+            has_fish = True
+    if not has_fish:
+        print("  无渔获物品")
 
     print("\n[部队成员]")
     has_troops = False
@@ -428,6 +450,10 @@ def start_cli(state):
         print("  kingdom status          - 查看王国状态")
         print("  lord assign <同伴id> <地点id> - 分封领主管理封地")
         print("  policy set <政策id>      - 制定国家政策")
+        print("  buy_gear <rod/bait> [数量]- 购买鱼竿或饵料")
+        print("  fish                     - 在水源地钓鱼")
+        print("  sell_fish <物品id> <数量> - 卖出钓到的鱼获/物品")
+        print("  fish_inventory           - 查看钓鱼收获")
         print("  rest                     - 原地休整（恢复士气）")
         print("  status                   - 查看军队与物品状态")
         print("  log [all]                - 查看历史行动日志（帝王本纪）")
@@ -446,6 +472,53 @@ def start_cli(state):
 
         elif cmd == "status":
             render_status(state)
+
+        elif cmd == "fish_inventory":
+            print("\n【钓鱼装备与渔获】")
+            rod_status = "已拥有" if state.equipment_gear.get("rod") else "未拥有"
+            print(f"  鱼竿: {rod_status} | 饵料数量: {state.bait_count}")
+            has_fish = False
+            for f_id, count in state.fish_inventory.items():
+                if count > 0:
+                    f_info = FISH_LOOT_TABLE.get(f_id, {})
+                    f_name = f_info.get("name", f_id)
+                    f_val = f_info.get("value", 0)
+                    print(f"  - {f_name} ({f_id}): {count} (价值: {f_val} 金)")
+                    has_fish = True
+            if not has_fish:
+                print("  暂无任何鱼获")
+
+        elif cmd == "buy_gear":
+            if len(parts) < 2:
+                print("请指定要购买的装备ID！例如: buy_gear rod 或 buy_gear bait 10")
+                continue
+            gear_id = parts[1].lower()
+            quantity = 1
+            if len(parts) >= 3:
+                try:
+                    quantity = int(parts[2])
+                except ValueError:
+                    print("数量必须是有效数字！")
+                    continue
+            res = buy_gear(state, gear_id, quantity)
+            print(f"\n{res}")
+
+        elif cmd == "fish":
+            res = fish(state, state.location)
+            print(f"\n{res}")
+
+        elif cmd == "sell_fish":
+            if len(parts) < 3:
+                print("请指定要出售的鱼获ID和数量！例如: sell_fish crucian_carp 2")
+                continue
+            item_id = parts[1]
+            try:
+                quantity = int(parts[2])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = sell_fish(state, item_id, quantity)
+            print(f"\n{res}")
 
         elif cmd == "log":
             if len(parts) > 1 and parts[1].lower() == "all":

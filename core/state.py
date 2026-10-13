@@ -30,6 +30,10 @@ class GameState:
         current_policy=None,
         lords=None,
         log_history=None,
+        equipment_gear=None,
+        bait_count=0,
+        fish_inventory=None,
+        battle_lost_today=False,
     ):
         self.day = day
         self.gold = gold
@@ -55,6 +59,10 @@ class GameState:
         self.current_policy = current_policy
         self.lords = lords if lords is not None else []
         self.log_history = log_history if log_history is not None else []
+        self.equipment_gear = equipment_gear if equipment_gear is not None else {"rod": False}
+        self.bait_count = bait_count
+        self.fish_inventory = fish_inventory if fish_inventory is not None else {}
+        self.battle_lost_today = battle_lost_today
 
     @property
     def cash(self):
@@ -106,6 +114,10 @@ class GameState:
             "current_policy": self.current_policy,
             "lords": list(self.lords),
             "log_history": [dict(e) for e in self.log_history],
+            "equipment_gear": dict(self.equipment_gear),
+            "bait_count": self.bait_count,
+            "fish_inventory": dict(self.fish_inventory),
+            "battle_lost_today": self.battle_lost_today,
         }
 
     @classmethod
@@ -136,6 +148,10 @@ class GameState:
             current_policy=data.get("current_policy", None),
             lords=data.get("lords", []),
             log_history=data.get("log_history", []),
+            equipment_gear=data.get("equipment_gear", {"rod": False}),
+            bait_count=data.get("bait_count", 0),
+            fish_inventory=data.get("fish_inventory", {}),
+            battle_lost_today=data.get("battle_lost_today", False),
         )
 
     def save(self, filepath):
