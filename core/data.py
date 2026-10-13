@@ -1,3 +1,5 @@
+"""数据定义模块：包含兵种、地图地点与随机事件配置。"""
+
 UNITS = {
     "peasant": {
         "name": "农民",
@@ -21,28 +23,81 @@ UNITS = {
 
 LOCATIONS = {
     "oak_village": {
+        "id": "oak_village",
         "name": "橡木村",
         "type": "village",
-        "x": 0,
-        "y": 0,
+        "neighbors": ["river_town", "pine_village"],
     },
     "pine_village": {
+        "id": "pine_village",
         "name": "松木村",
         "type": "village",
-        "x": 10,
-        "y": 0,
+        "neighbors": ["oak_village", "iron_town"],
     },
     "river_town": {
+        "id": "river_town",
         "name": "河畔镇",
         "type": "town",
-        "x": 5,
-        "y": 10,
+        "neighbors": ["oak_village", "wild_forest", "central_city"],
     },
     "iron_town": {
+        "id": "iron_town",
         "name": "铁矿镇",
         "type": "town",
-        "x": 15,
-        "y": 10,
+        "neighbors": ["pine_village", "wild_mountain", "central_city"],
+    },
+    "wild_forest": {
+        "id": "wild_forest",
+        "name": "迷雾森林",
+        "type": "wild",
+        "neighbors": ["river_town", "wild_mountain"],
+    },
+    "wild_mountain": {
+        "id": "wild_mountain",
+        "name": "黑风山",
+        "type": "wild",
+        "neighbors": ["iron_town", "wild_forest"],
+    },
+    "central_city": {
+        "id": "central_city",
+        "name": "许昌大都",
+        "type": "town",
+        "neighbors": ["river_town", "iron_town"],
+    },
+}
+
+EVENTS = {
+    "bandit_encounter": {
+        "id": "bandit_encounter",
+        "name": "遇到山贼",
+        "type": "combat",
+        "weight": 35,
+        "description": "前方路口遭遇了一伙凶恶的偷袭山贼！",
+        "enemy_power_min": 5,
+        "enemy_power_max": 20,
+    },
+    "caravan": {
+        "id": "caravan",
+        "name": "遇到商队",
+        "type": "caravan",
+        "weight": 20,
+        "description": "遇到一支友好行商队伍，得到了些许路费资助。",
+        "gold_reward": 30,
+    },
+    "treasure": {
+        "id": "treasure",
+        "name": "发现宝箱",
+        "type": "treasure",
+        "weight": 15,
+        "description": "在路边荒草丛中发现了一个破旧的遗落宝箱！",
+        "gold_reward": 50,
+    },
+    "nothing": {
+        "id": "nothing",
+        "name": "无事发生",
+        "type": "nothing",
+        "weight": 30,
+        "description": "沿途风景宜人，行程一路平安。",
     },
 }
 
