@@ -9,6 +9,13 @@ from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FA
 _quest_id_counter = 1
 
 
+def add_log(state, event_text):
+    """记录一条事件日志到历史记录，并维持最多 50 条最近记录。"""
+    state.log_history.append({"day": state.day, "event": event_text})
+    if len(state.log_history) > 50:
+        state.log_history = state.log_history[-50:]
+
+
 def update_faction_relations(state):
     """每日结算：更新势力之间的动态关系。"""
     f_ids = list(FACTIONS.keys())
@@ -349,6 +356,7 @@ def daily_update(state):
         report += f"\n【惩罚警告】{disband_msg}"
 
     state.add_log(report)
+    add_log(state, f"第 {state.day} 天结束。税收: {tax_income}, 耗粮: {total_food_consumed:.1f}")
     return report
 
 
@@ -443,18 +451,22 @@ def move(state, target_location_id):
         gold = event.get("gold_reward", 30)
         state.gold += gold
         state.add_log(f"移动至 {target_loc['name']} 途中：{event['description']} 获得 {gold} 金币。")
+        add_log(state, f"你在移动途中遭遇了：{event['description']}")
     elif event_type == "treasure":
         gold = event.get("gold_reward", 50)
         state.gold += gold
         state.add_log(f"移动至 {target_loc['name']} 途中：{event['description']} 获得 {gold} 金币。")
+        add_log(state, f"你在移动途中遭遇了：{event['description']}")
     elif event_type == "nothing":
         state.add_log(f"移动至 {target_loc['name']} 途中：{event['description']}")
+        add_log(state, f"你在移动途中遭遇了：{event['description']}")
     elif event_type == "combat":
         min_pow = event.get("enemy_power_min", 5)
         max_pow = event.get("enemy_power_max", 20)
         enemy_power = random.randint(min_pow, max_pow)
         event_data["enemy_power"] = enemy_power
         state.add_log(f"移动至 {target_loc['name']} 途中：{event['description']} 敌方战力：{enemy_power}。")
+        add_log(state, f"你在移动途中遭遇了：{event['description']}")
 
     return True, f"顺利到达 {target_loc['name']}", event_data
 
@@ -506,6 +518,7 @@ def resolve_combat_simple(state, enemy_power, choice):
         loss_detail = apply_casualties(state.troops, casualties)
         message = f"有序撤退避开战斗。伤亡人数：{casualties}。"
         state.add_log(f"遭遇战斗选择撤退。{message}")
+        add_log(state, f"战斗撤退，伤亡 {casualties} 人。")
 
         return {
             "victory": victory,
@@ -589,6 +602,7 @@ def resolve_combat_simple(state, enemy_power, choice):
         message += f" ({faction_notice})"
 
     state.add_log(f"选择{'主动进攻' if choice == 'attack' else '筑防坚守'}。{message}")
+    add_log(state, f"战斗{'胜利' if victory else '失败'}，伤亡 {casualties} 人。")
     return {
         "victory": victory,
         "choice": choice,
@@ -854,6 +868,7 @@ def declare_kingdom(state, kingdom_name):
     state.kingdom_name = kingdom_name
     msg = f"恭喜！你成功建立王国 [{kingdom_name}]，自立为王！"
     state.add_log(msg)
+    add_log(state, f"伟大的 {kingdom_name} 成立了！")
     return msg
 
 
