@@ -4,7 +4,19 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, QUEST_TEMPLATES, POLICIES
+from core.data import (
+    LOCATIONS,
+    EVENTS,
+    UNITS,
+    GOODS,
+    COMPANIONS,
+    EQUIPMENT,
+    FACTIONS,
+    QUEST_TEMPLATES,
+    POLICIES,
+    FISHING_GEAR,
+    FISH_LOOT_TABLE,
+)
 
 _quest_id_counter = 1
 
@@ -303,7 +315,12 @@ def daily_update(state):
     tax_income = int(tax_income)
     state.cash += tax_income
 
-    # 2. 耗粮
+    # 2. 战败惩罚
+    if getattr(state, "battle_lost_today", False):
+        state.morale = max(0, state.morale - 20)
+        state.battle_lost_today = False
+
+    # 3. 耗粮与无粮惩罚
     total_food_consumed = 0.0
     for unit_id, count in state.troops.items():
         if count > 0:
@@ -313,40 +330,39 @@ def daily_update(state):
 
     state.food -= total_food_consumed
 
-    disband_msg = ""
-    # 3. 士气与粮草断绝判定
-    if state.food < 0:
+    if state.food <= 0:
         state.food = 0.0
-        state.morale = max(0, state.morale - 20)
+        state.morale = max(0, state.morale - 10)
 
-    if state.morale <= 0:
-        # 强制解散一半兵力（从低级兵开始）
+    # 4. 脱队机制 (士气低落士气 < 30，每天流失 1-2 名最低级兵种)
+    disband_msg = ""
+    if state.morale < 30:
         total_soldiers = sum(state.troops.values())
-        to_disband = total_soldiers // 2
-        remaining_disband = to_disband
-        disbanded_detail = {}
+        if total_soldiers > 0:
+            to_desert = min(total_soldiers, random.randint(1, 2))
+            remaining_desert = to_desert
+            deserted_detail = {}
 
-        priority_order = ["peasant", "archer", "infantry"]
-        for unit_id in priority_order:
-            if unit_id in state.troops and state.troops[unit_id] > 0 and remaining_disband > 0:
-                loss = min(state.troops[unit_id], remaining_disband)
-                state.troops[unit_id] -= loss
-                remaining_disband -= loss
-                disbanded_detail[unit_id] = loss
+            priority_order = ["peasant", "archer", "infantry"]
+            for unit_id in priority_order:
+                if unit_id in state.troops and state.troops[unit_id] > 0 and remaining_desert > 0:
+                    loss = min(state.troops[unit_id], remaining_desert)
+                    state.troops[unit_id] -= loss
+                    remaining_desert -= loss
+                    deserted_detail[unit_id] = loss
 
-        for unit_id in state.troops:
-            if remaining_disband <= 0:
-                break
-            if state.troops[unit_id] > 0:
-                loss = min(state.troops[unit_id], remaining_disband)
-                state.troops[unit_id] -= loss
-                remaining_disband -= loss
-                disbanded_detail[unit_id] = loss
+            for unit_id in state.troops:
+                if remaining_desert <= 0:
+                    break
+                if state.troops[unit_id] > 0:
+                    loss = min(state.troops[unit_id], remaining_desert)
+                    state.troops[unit_id] -= loss
+                    remaining_desert -= loss
+                    deserted_detail[unit_id] = loss
 
-        state.morale = 50
-        disband_parts = [f"{UNITS.get(uid, {}).get('name', uid)} {cnt} 人" for uid, cnt in disbanded_detail.items() if cnt > 0]
-        disband_str = "、".join(disband_parts) if disband_parts else "无"
-        disband_msg = f"军队士气归零崩盘！解散了半数军队（{to_disband} 人: {disband_str}），士气恢复至 50。"
+            desert_parts = [f"{UNITS.get(uid, {}).get('name', uid)} {cnt} 人" for uid, cnt in deserted_detail.items() if cnt > 0]
+            desert_str = "、".join(desert_parts) if desert_parts else "无"
+            disband_msg = f"⚠️ 士气低落，士兵正在逃跑！流失了 {to_desert} 名士兵（{desert_str}）。"
 
     report = (
         f"【每日结算】税收增加：{tax_income} 金 | 耗粮：{total_food_consumed:.1f} | "
@@ -591,6 +607,8 @@ def resolve_combat_simple(state, enemy_power, choice):
         for q in state.active_quests:
             if q.get("type") == "hunt_bandits":
                 q["current_count"] = min(q.get("target_count", 1), q.get("current_count", 0) + 1)
+    else:
+        state.battle_lost_today = True
 
     # 4. 势力关系扣减判定
     loc_info = LOCATIONS.get(state.location, {})
@@ -971,5 +989,133 @@ def upgrade_unit(state, unit_id, quantity):
     state.troops[unit_id] -= quantity
     state.troops[upgrade_to_id] = state.troops.get(upgrade_to_id, 0) + quantity
     msg = f"成功将 {quantity} {unit_name} 晋升为 {quantity} {target_name}，花费 {total_cost} 金"
+    state.add_log(msg)
+    return msg
+
+
+def buy_gear(state, gear_id, quantity=1):
+    """购买钓鱼装备（鱼竿或饵料）。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if gear_id not in FISHING_GEAR:
+        return f"装备/物品 '{gear_id}' 不存在！"
+
+    if quantity <= 0:
+        return "购买数量必须大于 0"
+
+    gear_info = FISHING_GEAR[gear_id]
+    gear_name = gear_info["name"]
+    price = gear_info["price"]
+
+    if gear_id == "rod":
+        if state.equipment_gear.get("rod"):
+            return "你已经拥有鱼竿，无需重复购买！"
+        quantity = 1
+
+    total_cost = price * quantity
+    if state.cash < total_cost:
+        return f"金钱不足！购买 {quantity} 个 [{gear_name}] 需要 {total_cost} 金，当前金钱：{state.cash}"
+
+    state.cash -= total_cost
+    if gear_id == "rod":
+        state.equipment_gear["rod"] = True
+        msg = f"成功购买 [{gear_name}]！花费 {total_cost} 金。"
+    elif gear_id == "bait":
+        state.bait_count += quantity
+        msg = f"成功购买 {quantity} 个 [{gear_name}]！花费 {total_cost} 金。"
+
+    state.add_log(msg)
+    return msg
+
+
+def fish(state, location_id):
+    """在可钓鱼地点进行钓鱼行动。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    terrain = loc.get("terrain_type")
+    if terrain not in ["river", "lake", "sea"]:
+        return f"[{loc.get('name', location_id)}] 不是水源地（河流/湖泊/海边），无法钓鱼！"
+
+    if not state.equipment_gear.get("rod"):
+        return "你没有鱼竿，无法钓鱼！请先购买鱼竿。"
+
+    if state.bait_count <= 0:
+        return "你的饵料用尽了，无法钓鱼！请先购买饵料。"
+
+    # 消耗 1 单位饵料
+    state.bait_count -= 1
+
+    # 推进 1 天时间并触发每日耗粮与结算
+    advance_day(state)
+    daily_report = daily_update(state)
+
+    # 根据 FISH_LOOT_TABLE 权重随机产出
+    items = list(FISH_LOOT_TABLE.keys())
+    weights = [FISH_LOOT_TABLE[k]["weight"] for k in items]
+    loot_id = random.choices(items, weights=weights, k=1)[0]
+    loot_info = FISH_LOOT_TABLE[loot_id]
+    loot_name = loot_info["name"]
+
+    state.fish_inventory[loot_id] = state.fish_inventory.get(loot_id, 0) + 1
+    msg = f"经过一天的等待，你钓到了 [{loot_name}]！"
+
+    # 同伴自动钓鱼判定
+    companion_notes = []
+    for comp_id in state.companions:
+        comp_info = COMPANIONS.get(comp_id, {})
+        if comp_info.get("likes_fishing") and random.random() < 0.30:
+            comp_loot_id = random.choices(items, weights=weights, k=1)[0]
+            comp_loot_info = FISH_LOOT_TABLE[comp_loot_id]
+            comp_loot_name = comp_loot_info["name"]
+            state.fish_inventory[comp_loot_id] = state.fish_inventory.get(comp_loot_id, 0) + 1
+            comp_name = comp_info.get("name", comp_id)
+            companion_notes.append(f"[{comp_name}] 也钓到了一条 [{comp_loot_name}]！")
+
+    if companion_notes:
+        msg += "\n" + "\n".join(companion_notes)
+
+    msg += f"\n{daily_report}"
+    state.add_log(f"在 [{loc.get('name')}] 钓鱼，获得 [{loot_name}]。")
+    return msg
+
+
+def sell_fish(state, item_id, quantity):
+    """在拥有市场的地点出售钓到的鱼或垃圾。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "出售数量必须大于 0"
+
+    loc = LOCATIONS.get(state.location)
+    if not loc or loc.get("market") is None:
+        return f"[{loc.get('name', state.location) if loc else state.location}] 没有市场，无法出售物品！"
+
+    if item_id not in FISH_LOOT_TABLE:
+        return f"物品 '{item_id}' 不是钓鱼产物！"
+
+    current_qty = state.fish_inventory.get(item_id, 0)
+    item_info = FISH_LOOT_TABLE[item_id]
+    item_name = item_info["name"]
+
+    if current_qty < quantity:
+        return f"[{item_name}] 数量不足！当前持有：{current_qty}，尝试出售：{quantity}"
+
+    unit_val = item_info["value"]
+    total_income = unit_val * quantity
+
+    state.fish_inventory[item_id] -= quantity
+    state.cash += total_income
+
+    msg = f"成功卖出 {quantity} 个 [{item_name}]，获得 {total_income} 金币。"
     state.add_log(msg)
     return msg

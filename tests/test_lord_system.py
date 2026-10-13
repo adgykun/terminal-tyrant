@@ -105,19 +105,19 @@ class TestLordSystem(unittest.TestCase):
         self.assertEqual(self.state.food, initial_food - 10.0)
 
     def test_food_shortage_penalty(self):
-        """测试断粮惩罚及士气归零军队解散机制。"""
+        """测试断粮惩罚及士气低落军队流失机制。"""
         self.state.food = 2.0
         self.state.troops = {"peasant": 10, "infantry": 10}  # 每日消耗 15 粮
         self.state.morale = 10  # 低士气
 
-        # 每日结算，粮草不足耗尽 -> 粮草归0，士气 -20 (归0) -> 触发半数军队解散
+        # 每日结算，粮草不足耗尽 -> 粮草归0，士气 -10 (降至 0)，触发士气 < 30 的逃跑流失
         report = daily_update(self.state)
 
         self.assertEqual(self.state.food, 0.0)
-        self.assertEqual(self.state.morale, 50)  # 解散后恢复至 50
-        self.assertIn("军队士气归零崩盘", report)
-        # 初始总兵力 20，解散 10 人 (优先解散 10 个农民)
-        self.assertEqual(self.state.troops["peasant"], 0)
+        self.assertEqual(self.state.morale, 0)
+        self.assertIn("⚠️ 士气低落，士兵正在逃跑！", report)
+        # 初始农民 10 人，流失 1-2 名农民
+        self.assertIn(self.state.troops["peasant"], [8, 9])
         self.assertEqual(self.state.troops["infantry"], 10)
 
     def test_recruit_max_army_size(self):

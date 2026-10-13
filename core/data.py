@@ -87,6 +87,19 @@ EQUIPMENT = {
     },
 }
 
+FISHING_GEAR = {
+    "rod": {"name": "鱼竿", "price": 100},
+    "bait": {"name": "饵料", "price": 2},
+}
+
+FISH_LOOT_TABLE = {
+    "crucian_carp": {"name": "鲫鱼", "value": 10, "food": 2, "weight": 30},
+    "carp": {"name": "鲤鱼", "value": 15, "food": 3, "weight": 30},
+    "golden_carp": {"name": "金鲤鱼", "value": 100, "food": 5, "weight": 10},
+    "old_boot": {"name": "破靴子", "value": 0, "food": 0, "weight": 15},
+    "water_weed": {"name": "水草", "value": 0, "food": 0, "weight": 15},
+}
+
 COMPANIONS = {
     "c1": {
         "id": "c1",
@@ -95,6 +108,7 @@ COMPANIONS = {
         "bonus_type": "trade",
         "bonus_value": 0.1,
         "required_renown": 0,
+        "likes_fishing": True,
     },
     "c2": {
         "id": "c2",
@@ -103,6 +117,7 @@ COMPANIONS = {
         "bonus_type": "combat",
         "bonus_value": 10,
         "required_renown": 20,
+        "likes_fishing": False,
     },
     "c3": {
         "id": "c3",
@@ -111,6 +126,7 @@ COMPANIONS = {
         "bonus_type": "morale",
         "bonus_value": 20,
         "required_renown": 10,
+        "likes_fishing": False,
     },
 }
 
@@ -152,6 +168,7 @@ LOCATIONS = {
         "id": "oak_village",
         "name": "橡木村",
         "type": "village",
+        "terrain_type": "plain",
         "x": 10,
         "y": 10,
         "faction_id": "f1",
@@ -168,6 +185,7 @@ LOCATIONS = {
         "id": "pine_village",
         "name": "松木村",
         "type": "village",
+        "terrain_type": "plain",
         "x": 80,
         "y": 10,
         "faction_id": "f2",
@@ -184,6 +202,7 @@ LOCATIONS = {
         "id": "river_town",
         "name": "河畔镇",
         "type": "town",
+        "terrain_type": "river",
         "x": 20,
         "y": 40,
         "faction_id": "f1",
@@ -204,6 +223,7 @@ LOCATIONS = {
         "id": "iron_town",
         "name": "铁矿镇",
         "type": "town",
+        "terrain_type": "plain",
         "x": 70,
         "y": 40,
         "faction_id": "f2",
@@ -224,6 +244,7 @@ LOCATIONS = {
         "id": "wild_forest",
         "name": "迷雾森林",
         "type": "wild",
+        "terrain_type": "lake",
         "x": 30,
         "y": 80,
         "faction_id": "f3",
@@ -236,6 +257,7 @@ LOCATIONS = {
         "id": "wild_mountain",
         "name": "黑风山",
         "type": "wild",
+        "terrain_type": "plain",
         "x": 70,
         "y": 80,
         "faction_id": "f3",
@@ -248,6 +270,7 @@ LOCATIONS = {
         "id": "central_city",
         "name": "许昌大都",
         "type": "town",
+        "terrain_type": "sea",
         "x": 45,
         "y": 45,
         "faction_id": "f3",
