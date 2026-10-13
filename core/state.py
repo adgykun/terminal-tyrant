@@ -4,7 +4,21 @@ import json
 class GameState:
     """管理游戏世界的持久化状态数据结构。"""
 
-    def __init__(self, day=1, gold=100, location="oak_village", morale=100, troops=None, inventory=None, logs=None):
+    def __init__(
+        self,
+        day=1,
+        gold=100,
+        location="oak_village",
+        morale=100,
+        troops=None,
+        inventory=None,
+        logs=None,
+        companions=None,
+        fiefs=None,
+        renown=0,
+        food=100,
+        max_army_size=20,
+    ):
         self.day = day
         self.gold = gold
         self.location = location
@@ -12,6 +26,11 @@ class GameState:
         self.troops = troops if troops is not None else {"peasant": 0, "infantry": 0, "archer": 0}
         self.inventory = inventory if inventory is not None else {"wheat": 0, "iron": 0}
         self.logs = logs if logs is not None else []
+        self.companions = companions if companions is not None else []
+        self.fiefs = fiefs if fiefs is not None else []
+        self.renown = renown
+        self.food = food
+        self.max_army_size = max_army_size
 
     @property
     def cash(self):
@@ -46,6 +65,11 @@ class GameState:
             "troops": dict(self.troops),
             "inventory": dict(self.inventory),
             "logs": list(self.logs),
+            "companions": list(self.companions),
+            "fiefs": list(self.fiefs),
+            "renown": self.renown,
+            "food": self.food,
+            "max_army_size": self.max_army_size,
         }
 
     @classmethod
@@ -59,6 +83,11 @@ class GameState:
             troops=data.get("troops", {}),
             inventory=data.get("inventory", {}),
             logs=data.get("logs", []),
+            companions=data.get("companions", []),
+            fiefs=data.get("fiefs", []),
+            renown=data.get("renown", 0),
+            food=data.get("food", 100),
+            max_army_size=data.get("max_army_size", 20),
         )
 
     def save(self, filepath):
