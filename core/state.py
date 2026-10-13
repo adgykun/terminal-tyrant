@@ -34,6 +34,7 @@ class GameState:
         bait_count=0,
         fish_inventory=None,
         battle_lost_today=False,
+        npc_states=None,
     ):
         self.day = day
         self.gold = gold
@@ -63,6 +64,14 @@ class GameState:
         self.bait_count = bait_count
         self.fish_inventory = fish_inventory if fish_inventory is not None else {}
         self.battle_lost_today = battle_lost_today
+        if npc_states is not None:
+            self.npc_states = npc_states
+        else:
+            self.npc_states = {
+                "tavern_keeper": {"mood": "neutral", "last_interaction": ""},
+                "blacksmith": {"mood": "neutral", "last_interaction": ""},
+                "arena_host": {"mood": "neutral", "last_interaction": ""},
+            }
 
     @property
     def cash(self):
@@ -118,6 +127,7 @@ class GameState:
             "bait_count": self.bait_count,
             "fish_inventory": dict(self.fish_inventory),
             "battle_lost_today": self.battle_lost_today,
+            "npc_states": {k: dict(v) for k, v in self.npc_states.items()},
         }
 
     @classmethod
@@ -152,6 +162,7 @@ class GameState:
             bait_count=data.get("bait_count", 0),
             fish_inventory=data.get("fish_inventory", {}),
             battle_lost_today=data.get("battle_lost_today", False),
+            npc_states=data.get("npc_states", None),
         )
 
     def save(self, filepath):
