@@ -25,6 +25,10 @@ class GameState:
         faction_relations=None,
         active_quests=None,
         completed_quests=None,
+        is_king=False,
+        kingdom_name="",
+        current_policy=None,
+        lords=None,
     ):
         self.day = day
         self.gold = gold
@@ -45,6 +49,10 @@ class GameState:
         self.faction_relations = faction_relations if faction_relations is not None else {"f1": 0, "f2": 0, "f3": 0}
         self.active_quests = active_quests if active_quests is not None else []
         self.completed_quests = completed_quests if completed_quests is not None else []
+        self.is_king = is_king
+        self.kingdom_name = kingdom_name
+        self.current_policy = current_policy
+        self.lords = lords if lords is not None else []
 
     @property
     def cash(self):
@@ -91,6 +99,10 @@ class GameState:
             "faction_relations": dict(self.faction_relations),
             "active_quests": [dict(q) if isinstance(q, dict) else q for q in self.active_quests],
             "completed_quests": list(self.completed_quests),
+            "is_king": self.is_king,
+            "kingdom_name": self.kingdom_name,
+            "current_policy": self.current_policy,
+            "lords": list(self.lords),
         }
 
     @classmethod
@@ -116,6 +128,10 @@ class GameState:
             faction_relations=data.get("faction_relations", {"f1": 0, "f2": 0, "f3": 0}),
             active_quests=data.get("active_quests", []),
             completed_quests=data.get("completed_quests", []),
+            is_king=data.get("is_king", False),
+            kingdom_name=data.get("kingdom_name", ""),
+            current_policy=data.get("current_policy", None),
+            lords=data.get("lords", []),
         )
 
     def save(self, filepath):
