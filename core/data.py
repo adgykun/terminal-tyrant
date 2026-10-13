@@ -1,5 +1,11 @@
 """数据定义模块：包含装备、兵种、地图地点与随机事件配置。"""
 
+LORE = {
+    "background": "旧帝国崩塌后的第 50 年，大陆分裂为三个互相征伐的王国。你是一名身无分文的流浪者，怀揣着成为‘终端暴君’的野心，踏上了这片充满战火与机遇的土地……"
+}
+
+PERSONALITY_TRAITS = ["hot_headed", "cautious", "greedy", "loyal", "cowardly"]
+
 FACTIONS = {
     "f1": {
         "id": "f1",
@@ -109,6 +115,9 @@ COMPANIONS = {
         "bonus_value": 0.1,
         "required_renown": 0,
         "likes_fishing": True,
+        "personality": "greedy",
+        "memory": [],
+        "greeting": "金币的声音永远比剑吟更悦耳，阁下有何高见？",
     },
     "c2": {
         "id": "c2",
@@ -118,6 +127,9 @@ COMPANIONS = {
         "bonus_value": 10,
         "required_renown": 20,
         "likes_fishing": False,
+        "personality": "hot_headed",
+        "memory": [],
+        "greeting": "我的剑早就渴了！说吧，下一个敌人是谁？",
     },
     "c3": {
         "id": "c3",
@@ -127,6 +139,9 @@ COMPANIONS = {
         "bonus_value": 20,
         "required_renown": 10,
         "likes_fishing": False,
+        "personality": "cautious",
+        "memory": [],
+        "greeting": "战场瞬息万变，唯有三思而后行才能走得更远。",
     },
 }
 
