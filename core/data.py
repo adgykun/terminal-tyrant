@@ -76,6 +76,35 @@ QUEST_TEMPLATES = [
     },
 ]
 
+APPEARANCE_TIERS = {
+    (1, 10): {
+        "desc": "凶神恶煞/奇丑无比",
+        "combat_effect": "enemy_morale -15",
+        "social_modifier": -50,
+    },
+    (11, 40): {
+        "desc": "相貌平平",
+        "combat_effect": "none",
+        "social_modifier": -10,
+    },
+    (41, 80): {
+        "desc": "大众脸",
+        "combat_effect": "none",
+        "social_modifier": 0,
+    },
+    (81, 95): {
+        "desc": "俊美/靓丽",
+        "combat_effect": "none",
+        "social_modifier": 20,
+    },
+    (96, 100): {
+        "desc": "绝世容颜/倾国倾城",
+        "combat_effect": "none",
+        "social_modifier": 50,
+        "special_event": "admirer",
+    },
+}
+
 EQUIPMENT = {
     "w1": {
         "id": "w1",
@@ -83,6 +112,7 @@ EQUIPMENT = {
         "type": "weapon",
         "power_bonus": 5,
         "price": 200,
+        "appearance_bonus": 0,
     },
     "w2": {
         "id": "w2",
@@ -90,6 +120,7 @@ EQUIPMENT = {
         "type": "weapon",
         "power_bonus": 15,
         "price": 800,
+        "appearance_bonus": 0,
     },
     "a1": {
         "id": "a1",
@@ -97,6 +128,7 @@ EQUIPMENT = {
         "type": "armor",
         "power_bonus": 3,
         "price": 150,
+        "appearance_bonus": 0,
     },
     "a2": {
         "id": "a2",
@@ -104,6 +136,7 @@ EQUIPMENT = {
         "type": "armor",
         "power_bonus": 8,
         "price": 400,
+        "appearance_bonus": 0,
     },
     "h1": {
         "id": "h1",
@@ -111,6 +144,7 @@ EQUIPMENT = {
         "type": "horse",
         "power_bonus": 5,
         "price": 300,
+        "appearance_bonus": 5,
     },
     "h2": {
         "id": "h2",
@@ -118,6 +152,23 @@ EQUIPMENT = {
         "type": "horse",
         "power_bonus": 12,
         "price": 700,
+        "appearance_bonus": 10,
+    },
+    "c1": {
+        "id": "c1",
+        "name": "华丽丝绸",
+        "type": "clothing",
+        "power_bonus": 1,
+        "price": 350,
+        "appearance_bonus": 15,
+    },
+    "m1": {
+        "id": "m1",
+        "name": "精致面具",
+        "type": "clothing",
+        "power_bonus": 2,
+        "price": 300,
+        "appearance_bonus": 10,
     },
 }
 

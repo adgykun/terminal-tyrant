@@ -73,11 +73,21 @@ class GUIClient:
         self.font_small = get_font(14)
         self.font_large = get_font(24)
 
-        # UI 状态与弹窗 (None, 'shop', 'recruit', 'tavern', 'smithy', 'arena', 'combat', 'combat_result')
-        self.overlay = None
+        # UI 状态与弹窗 (None, 'char_creation', 'shop', 'recruit', 'tavern', 'smithy', 'arena', 'combat', 'combat_result')
+        self.overlay = "char_creation" if not getattr(self.state, "appearance_revealed", False) else None
         self.combat_event = None
         self.combat_result = None
         self.message = "欢迎来到 Terminal Tyrant！点击相邻地点进行移动。"
+
+        # 角色创建分配点数状态
+        self.str_pts = 5
+        self.int_pts = 5
+        self.charm_pts = 5
+        self.creation_error = ""
+
+        # 战斗场景辅助变量
+        self.combat_logs = []
+        self.combat_finished_time = None
 
         # 交互按钮列表 (用于点击判断)
         self.buttons = []
@@ -168,6 +178,81 @@ class GUIClient:
             pygame.draw.circle(self.screen, COLOR_PLAYER, player_pos, 7)
             pygame.draw.circle(self.screen, COLOR_TEXT, player_pos, 7, 1)
 
+    def render_char_creation_overlay(self):
+        """渲染开局属性分配窗口。"""
+        overlay_rect = pygame.Rect(100, 80, 600, 440)
+        s = pygame.Surface((600, 440), pygame.SRCALPHA)
+        s.fill(COLOR_MODAL_BG)
+        self.screen.blit(s, (100, 80))
+        pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
+
+        y = 110
+        title_surf = self.font_large.render("—— 角色创建: 属性分配 ——", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
+        y += 40
+
+        tip = "请分配 15 点总属性到力量、智力、魅力（每项 1-10）："
+        self.screen.blit(self.font_main.render(tip, True, COLOR_TEXT), (140, y))
+        y += 35
+
+        total = self.str_pts + self.int_pts + self.charm_pts
+        total_color = COLOR_SUCCESS if total == 15 else COLOR_WARNING
+        total_str = f"当前分配总和: {total} / 15"
+        self.screen.blit(self.font_main.render(total_str, True, total_color), (140, y))
+        y += 30
+
+        # 力量调整
+        self.screen.blit(self.font_main.render(f"力量 (Strength): {self.str_pts}", True, COLOR_TEXT), (160, y))
+        b_str_sub = pygame.Rect(380, y - 4, 35, 26)
+        b_str_add = pygame.Rect(425, y - 4, 35, 26)
+        def dec_str():
+            self.str_pts = max(1, self.str_pts - 1)
+        def inc_str():
+            self.str_pts = min(10, self.str_pts + 1)
+        self.draw_button(b_str_sub, "-", dec_str)
+        self.draw_button(b_str_add, "+", inc_str)
+        y += 35
+
+        # 智力调整
+        self.screen.blit(self.font_main.render(f"智力 (Intellect): {self.int_pts}", True, COLOR_TEXT), (160, y))
+        b_int_sub = pygame.Rect(380, y - 4, 35, 26)
+        b_int_add = pygame.Rect(425, y - 4, 35, 26)
+        def dec_int():
+            self.int_pts = max(1, self.int_pts - 1)
+        def inc_int():
+            self.int_pts = min(10, self.int_pts + 1)
+        self.draw_button(b_int_sub, "-", dec_int)
+        self.draw_button(b_int_add, "+", inc_int)
+        y += 35
+
+        # 魅力调整
+        self.screen.blit(self.font_main.render(f"魅力 (Charm): {self.charm_pts}", True, COLOR_TEXT), (160, y))
+        b_cha_sub = pygame.Rect(380, y - 4, 35, 26)
+        b_cha_add = pygame.Rect(425, y - 4, 35, 26)
+        def dec_cha():
+            self.charm_pts = max(1, self.charm_pts - 1)
+        def inc_cha():
+            self.charm_pts = min(10, self.charm_pts + 1)
+        self.draw_button(b_cha_sub, "-", dec_cha)
+        self.draw_button(b_cha_add, "+", inc_cha)
+        y += 40
+
+        if self.creation_error:
+            self.screen.blit(self.font_main.render(self.creation_error, True, COLOR_WARNING), (160, y))
+            y += 30
+
+        btn_confirm = pygame.Rect(320, 450, 160, 40)
+        def confirm_creation():
+            if self.str_pts + self.int_pts + self.charm_pts != 15:
+                self.creation_error = "属性点数总和必须严格等于 15 点！"
+                return
+            engine.create_character(self.state, self.str_pts, self.int_pts, self.charm_pts)
+            reveal_text = engine.reveal_appearance(self.state)
+            self.message = reveal_text
+            self.overlay = None
+
+        self.draw_button(btn_confirm, "完成加点并揭晓外貌", confirm_creation)
+
     def render_panel(self):
         """绘制右侧 200x600 UI 信息面板。"""
         panel_rect = pygame.Rect(600, 0, 200, 600)
@@ -186,9 +271,14 @@ class GUIClient:
         pygame.draw.line(self.screen, COLOR_BORDER, (x_margin, y), (785, y), 1)
         y += 10
 
+        attrs = getattr(self.state, "attributes", {"strength": 5, "intellect": 5, "charm": 5})
+        total_app = engine.get_total_appearance(self.state) if hasattr(engine, "get_total_appearance") else self.state.appearance
+
         # 基础状态信息
         stats = [
             f"天数: 第 {self.state.day} 天",
+            f"力量: {attrs.get('strength', 5)} | 智力: {attrs.get('intellect', 5)}",
+            f"魅力: {attrs.get('charm', 5)} | 外貌: {total_app}",
             f"金币: {self.state.gold} 金",
             f"粮食: {self.state.food:.1f}",
             f"士气: {self.state.morale} / 100",
@@ -197,7 +287,7 @@ class GUIClient:
         for stat in stats:
             surf = self.font_main.render(stat, True, COLOR_TEXT)
             self.screen.blit(surf, (x_margin, y))
-            y += 22
+            y += 20
 
         y += 10
         pygame.draw.line(self.screen, COLOR_BORDER, (x_margin, y), (785, y), 1)
@@ -530,83 +620,139 @@ class GUIClient:
         self.draw_button(btn_close, "返回地图 (ESC)", close_arena)
 
     def render_combat_overlay(self):
-        """渲染战斗抉择与结算弹窗。"""
-        overlay_rect = pygame.Rect(120, 100, 560, 400)
-        s = pygame.Surface((560, 400), pygame.SRCALPHA)
+        """渲染图形化战斗画面 Scene：蓝色玩家矩形+绿血条，红色敌军矩形+红血条，底部[进攻/防御/撤退]按钮，侧边/中部同伴吐槽滚动日志区。"""
+        overlay_rect = pygame.Rect(50, 40, 700, 520)
+        s = pygame.Surface((700, 520), pygame.SRCALPHA)
         s.fill(COLOR_MODAL_BG)
-        self.screen.blit(s, (120, 100))
+        self.screen.blit(s, (50, 40))
         pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
 
-        y = 120
+        # 战斗顶部标题
+        title_surf = self.font_large.render("⚔️ 战场对决 Scene ⚔️", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=55))
+
+        enemy_power = self.combat_event.get("enemy_power", 10)
+        player_power = engine.calculate_army_power(self.state.troops) + self.state.personal_power
+
+        # 左侧：蓝色矩形（玩家），上方绘制绿色血条
+        player_rect = pygame.Rect(100, 150, 100, 100)
+        pygame.draw.rect(self.screen, (50, 120, 220), player_rect, border_radius=6)
+        pygame.draw.rect(self.screen, COLOR_TEXT, player_rect, 2, border_radius=6)
+        p_txt = self.font_main.render("我方部队", True, COLOR_TEXT)
+        self.screen.blit(p_txt, p_txt.get_rect(center=(150, 200)))
+
+        # 玩家血条（绿色）
+        pygame.draw.rect(self.screen, (60, 60, 60), (100, 125, 100, 15), border_radius=3)
+        max_p_power = max(100, player_power)
+        p_bar_w = int(100 * (player_power / max_p_power))
+        if p_bar_w > 0:
+            pygame.draw.rect(self.screen, (50, 200, 80), (100, 125, p_bar_w, 15), border_radius=3)
+        p_hp_txt = self.font_small.render(f"战力: {player_power}", True, COLOR_TEXT)
+        self.screen.blit(p_hp_txt, (100, 105))
+
+        # 右侧：红色矩形（敌人），上方绘制红色血条
+        enemy_rect = pygame.Rect(600, 150, 100, 100)
+        pygame.draw.rect(self.screen, (220, 60, 60), enemy_rect, border_radius=6)
+        pygame.draw.rect(self.screen, COLOR_TEXT, enemy_rect, 2, border_radius=6)
+        e_txt = self.font_main.render("敌方部队", True, COLOR_TEXT)
+        self.screen.blit(e_txt, e_txt.get_rect(center=(650, 200)))
+
+        # 敌人血条（红色）
+        pygame.draw.rect(self.screen, (60, 60, 60), (600, 125, 100, 15), border_radius=3)
+        max_e_power = max(100, enemy_power)
+        e_bar_w = int(100 * (enemy_power / max_e_power))
+        if e_bar_w > 0:
+            pygame.draw.rect(self.screen, (220, 50, 50), (600, 125, e_bar_w, 15), border_radius=3)
+        e_hp_txt = self.font_small.render(f"战力: {enemy_power}", True, COLOR_TEXT)
+        self.screen.blit(e_hp_txt, (600, 105))
+
+        # 中部/侧边：半透明文本框，作为“战斗日志与同伴语音”滚动显示区
+        log_box_rect = pygame.Rect(220, 110, 360, 260)
+        s_log = pygame.Surface((360, 260), pygame.SRCALPHA)
+        s_log.fill((10, 10, 15, 180))
+        self.screen.blit(s_log, (220, 110))
+        pygame.draw.rect(self.screen, COLOR_BORDER, log_box_rect, 1, border_radius=5)
+
+        # 渲染日志与同伴语音内容
+        log_y = 120
+        title_log = self.font_small.render("【战场动态与同伴实时吐槽】", True, COLOR_HIGHLIGHT)
+        self.screen.blit(title_log, (230, log_y))
+        log_y += 22
+
+        if not self.combat_logs:
+            quotes = engine.get_battle_companion_quote(self.state, "combat_round")
+            if quotes:
+                for q in quotes:
+                    self.combat_logs.append(q)
+            else:
+                self.combat_logs.append("同伴默不作声，紧张地盯紧敌军...")
+
+        for line in self.combat_logs[-8:]:
+            # 简易多行折行渲染
+            while len(line) > 0:
+                chunk = line[:20]
+                line = line[20:]
+                s_txt = self.font_small.render(chunk, True, COLOR_TEXT)
+                self.screen.blit(s_txt, (230, log_y))
+                log_y += 18
+                if log_y > 350:
+                    break
+
+        # 底部：三个操作按钮区域 [进攻] [防御] [撤退]
+        btn_y = 400
         if self.combat_result is None:
-            # 战斗决策阶段
-            title_surf = self.font_large.render("⚠️ 遭遇敌对敌人！", True, COLOR_WARNING)
-            self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
-            y += 45
-
-            enemy_power = self.combat_event.get("enemy_power", 10)
-            player_power = engine.calculate_army_power(self.state.troops) + self.state.personal_power
-
-            info1 = f"敌方估算战力: {enemy_power}"
-            info2 = f"我方军队战力: {player_power}"
-            self.screen.blit(self.font_main.render(info1, True, COLOR_WARNING), (160, y))
-            y += 25
-            self.screen.blit(self.font_main.render(info2, True, COLOR_SUCCESS), (160, y))
-            y += 40
-
-            desc = "请做出你的指挥决策："
-            self.screen.blit(self.font_main.render(desc, True, COLOR_TEXT), (160, y))
-            y += 35
-
-            # 选项按钮
-            btn_attack = pygame.Rect(160, y, 120, 35)
+            btn_attack = pygame.Rect(180, btn_y, 120, 40)
             def do_attack():
-                self.combat_result = engine.resolve_combat_simple(
-                    self.state, enemy_power, "attack"
-                )
-            self.draw_button(btn_attack, "[1] 主动进攻", do_attack)
+                res = engine.resolve_combat_simple(self.state, enemy_power, "attack")
+                self.combat_result = res
+                self.combat_logs.append(res["message"])
+                v_quotes = engine.get_battle_companion_quote(self.state, "combat_victory" if res["victory"] else "combat_defeat")
+                for q in v_quotes:
+                    self.combat_logs.append(q)
+                self.combat_finished_time = pygame.time.get_ticks()
+            self.draw_button(btn_attack, "[1] 进攻", do_attack)
 
-            btn_defend = pygame.Rect(300, y, 120, 35)
+            btn_defend = pygame.Rect(340, btn_y, 120, 40)
             def do_defend():
-                self.combat_result = engine.resolve_combat_simple(
-                    self.state, enemy_power, "defend"
-                )
-            self.draw_button(btn_defend, "[2] 筑防坚守", do_defend)
+                res = engine.resolve_combat_simple(self.state, enemy_power, "defend")
+                self.combat_result = res
+                self.combat_logs.append(res["message"])
+                v_quotes = engine.get_battle_companion_quote(self.state, "combat_victory" if res["victory"] else "combat_defeat")
+                for q in v_quotes:
+                    self.combat_logs.append(q)
+                self.combat_finished_time = pygame.time.get_ticks()
+            self.draw_button(btn_defend, "[2] 防御", do_defend)
 
-            btn_retreat = pygame.Rect(440, y, 120, 35)
+            btn_retreat = pygame.Rect(500, btn_y, 120, 40)
             def do_retreat():
-                self.combat_result = engine.resolve_combat_simple(
-                    self.state, enemy_power, "retreat"
-                )
-            self.draw_button(btn_retreat, "[3] 有序撤退", do_retreat)
+                res = engine.resolve_combat_simple(self.state, enemy_power, "retreat")
+                self.combat_result = res
+                self.combat_logs.append(res["message"])
+                v_quotes = engine.get_battle_companion_quote(self.state, "combat_defeat")
+                for q in v_quotes:
+                    self.combat_logs.append(q)
+                self.combat_finished_time = pygame.time.get_ticks()
+            self.draw_button(btn_retreat, "[3] 撤退", do_retreat)
 
         else:
-            # 战斗结算界面
-            res = self.combat_result
-            title_text = "🎉 战斗胜利！" if res.get("victory") else "💥 战斗不利/撤退！"
-            color = COLOR_SUCCESS if res.get("victory") else COLOR_WARNING
+            # 战斗结束状态与延迟 2 秒自动返回或点击确认按钮
+            res_txt = "战斗胜利！" if self.combat_result.get("victory") else "战斗失败/已撤退！"
+            r_surf = self.font_main.render(res_txt, True, COLOR_SUCCESS if self.combat_result.get("victory") else COLOR_WARNING)
+            self.screen.blit(r_surf, r_surf.get_rect(centerx=400, top=btn_y))
 
-            title_surf = self.font_large.render(title_text, True, color)
-            self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
-            y += 45
-
-            msg_lines = [
-                res.get("message", ""),
-                f"战利品金币: +{res.get('gold_gained', 0)} 金",
-                f"我方伤亡总计: {res.get('total_casualties', 0)} 人",
-            ]
-            for line in msg_lines:
-                self.screen.blit(self.font_main.render(line, True, COLOR_TEXT), (160, y))
-                y += 28
-
-            y += 20
-            btn_confirm = pygame.Rect(340, y, 120, 35)
-            def finish_combat():
-                self.message = res.get("message", "战斗结束")
+            btn_confirm = pygame.Rect(340, btn_y + 35, 120, 35)
+            def finish_combat_gui():
+                self.message = self.combat_result.get("message", "战斗结束")
                 self.combat_event = None
                 self.combat_result = None
+                self.combat_logs = []
+                self.combat_finished_time = None
                 self.overlay = None
-            self.draw_button(btn_confirm, "确认 (ESC)", finish_combat)
+            self.draw_button(btn_confirm, "返回大地图", finish_combat_gui)
+
+            # 判断是否超过 2 秒延迟自动离开
+            if self.combat_finished_time and pygame.time.get_ticks() - self.combat_finished_time > 2000:
+                finish_combat_gui()
 
     def handle_fishing(self):
         """按 F 键触发钓鱼行动。"""
@@ -719,7 +865,9 @@ class GUIClient:
             self.render_panel()
 
             # 3. 绘制覆盖层弹窗 (注册弹窗按钮)
-            if self.overlay == "shop":
+            if self.overlay == "char_creation":
+                self.render_char_creation_overlay()
+            elif self.overlay == "shop":
                 self.render_shop_overlay()
             elif self.overlay == "recruit":
                 self.render_recruit_overlay()

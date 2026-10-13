@@ -17,10 +17,102 @@ from core.data import (
     FISHING_GEAR,
     FISH_LOOT_TABLE,
     NPC_MERCHANTS,
+    APPEARANCE_TIERS,
 )
-from core.dialogue_engine import get_formatted_npc_dialogue
+from core.dialogues import APPEARANCE_REVEAL_TEXTS, ADMIRER_EVENT_TEXTS
+from core.dialogue_engine import get_formatted_npc_dialogue, get_dialogue
 
 _quest_id_counter = 1
+
+
+def create_character(state, str_pts, int_pts, charm_pts):
+    """分配 15 点基础属性并盲盒抽取外貌数值。"""
+    if str_pts + int_pts + charm_pts != 15:
+        raise ValueError("属性点数总和必须严格等于 15！")
+    for name, pts in [("力量", str_pts), ("智力", int_pts), ("魅力", charm_pts)]:
+        if not (1 <= pts <= 10):
+            raise ValueError(f"{name} 属性必须在 1 至 10 之间！")
+
+    state.attributes = {
+        "strength": str_pts,
+        "intellect": int_pts,
+        "charm": charm_pts,
+    }
+    state.appearance = random.randint(1, 100)
+    state.appearance_revealed = False
+    return state
+
+
+def get_total_appearance(state):
+    """计算玩家基础外貌与当前穿戴装备的外貌加成之和。"""
+    base_app = getattr(state, "appearance", 50)
+    eq_app_bonus = 0
+    if hasattr(state, "equipment") and isinstance(state.equipment, dict):
+        for eq_id in state.equipment.values():
+            if eq_id in EQUIPMENT:
+                eq_app_bonus += EQUIPMENT[eq_id].get("appearance_bonus", 0)
+    return base_app + eq_app_bonus
+
+
+def reveal_appearance(state):
+    """揭晓玩家外貌值及对应的外貌描述层级。"""
+    app_val = getattr(state, "appearance", 50)
+    state.appearance_revealed = True
+
+    matched_tier = None
+    for range_tuple, tier_data in APPEARANCE_TIERS.items():
+        if range_tuple[0] <= app_val <= range_tuple[1]:
+            matched_tier = (range_tuple, tier_data)
+            break
+
+    if not matched_tier:
+        tier_data = {"desc": "大众脸", "combat_effect": "none", "social_modifier": 0}
+        texts = ["你在溪边照了照，水中的倒影气色尚可，面貌规规矩矩。"]
+    else:
+        range_tuple, tier_data = matched_tier
+        texts = APPEARANCE_REVEAL_TEXTS.get(range_tuple, ["你注视着自己的倒影。"])
+
+    desc_text = random.choice(texts)
+    tier_name = tier_data.get("desc", "未知")
+    res_msg = f"【外貌揭晓】外貌数值: {app_val} ({tier_name})\n{desc_text}"
+    state.add_log(res_msg)
+    return res_msg
+
+
+def trigger_admirer_event(state):
+    """绝世容颜倒贴随机事件：随机给予金钱 (100-500) 或稀有装备。"""
+    template = random.choice(ADMIRER_EVENT_TEXTS)
+    if random.random() < 0.7:
+        reward_gold = random.randint(100, 500)
+        state.gold += reward_gold
+        reward_str = f"获得 {reward_gold} 金币"
+    else:
+        eq_id = random.choice(list(EQUIPMENT.keys()))
+        eq_item = dict(EQUIPMENT[eq_id])
+        state.loot.append(eq_item)
+        reward_str = f"获得稀有装备 [{eq_item['name']}]"
+
+    event_msg = f"【仰慕者倾心】{template.replace('[REWARD]', reward_str)}"
+    state.add_log(event_msg)
+    return event_msg
+
+
+def get_battle_companion_quote(state, combat_context):
+    """获取所有已招募同伴在本轮战斗中的吐槽台词列表。"""
+    quotes = []
+    if not hasattr(state, "companions") or not state.companions:
+        return quotes
+
+    for comp_id in state.companions:
+        comp_info = COMPANIONS.get(comp_id)
+        if not comp_info:
+            comp_info = {"id": comp_id, "name": comp_id, "personality": "cautious"}
+
+        comp_name = comp_info.get("name", comp_id)
+        dialogue_text = get_dialogue(comp_info, combat_context, state)
+        quotes.append(f"[{comp_name}]: “{dialogue_text}”")
+
+    return quotes
 
 
 def add_log(state, event_text):
@@ -460,6 +552,12 @@ def move(state, target_location_id):
     # 移动消耗少量士气 (最低归零)
     state.morale = max(0, state.morale - 5)
 
+    # 15% 概率触发倾国倾城仰慕者事件
+    app_val = getattr(state, "appearance", 50)
+    if app_val >= 96 and random.random() < 0.15:
+        admirer_msg = trigger_admirer_event(state)
+        state.add_log(admirer_msg)
+
     # 抽取随机事件
     event = select_random_event()
     event_type = event.get("type")
@@ -519,6 +617,14 @@ def resolve_combat_simple(state, enemy_power, choice):
     player_power = calculate_army_power(state.troops) + state.personal_power + eq_bonus
     total_soldiers = sum(state.troops.values())
 
+    # 极丑外貌恐吓逻辑 (1 <= appearance <= 10 时敌方受恐吓)
+    intimidate_msg = ""
+    app_val = getattr(state, "appearance", 0)
+    if 1 <= app_val <= 10:
+        intimidate_msg = "你的凶恶面容让敌人感到恐惧，敌方士气大减！"
+        # 敌方士气下降可表现为敌方有效战力折减
+        enemy_power = max(1, int(enemy_power * 0.85))
+
     victory = False
     gold_gained = 0
     casualties = 0
@@ -535,6 +641,8 @@ def resolve_combat_simple(state, enemy_power, choice):
 
         loss_detail = apply_casualties(state.troops, casualties)
         message = f"有序撤退避开战斗。伤亡人数：{casualties}。"
+        if intimidate_msg:
+            message = intimidate_msg + " " + message
         state.add_log(f"遭遇战斗选择撤退。{message}")
         add_log(state, f"战斗撤退，伤亡 {casualties} 人。")
 
@@ -590,6 +698,9 @@ def resolve_combat_simple(state, enemy_power, choice):
 
     else:
         raise ValueError(f"未知的战斗决策: {choice}")
+
+    if intimidate_msg:
+        message = intimidate_msg + " " + message
 
     if victory:
         # 1. 掉落装备 (30% 概率)
@@ -852,8 +963,15 @@ def recruit(state, location_id, unit_id, quantity):
 
     unit_info = UNITS.get(unit_id, {})
     unit_name = unit_info.get("name", unit_id)
-    cost_per_unit = unit_info.get("recruit_cost", 0)
-    total_cost = cost_per_unit * quantity
+    base_cost_per_unit = unit_info.get("recruit_cost", 0)
+
+    # 魅力招募折扣: 招募成本 = 基础成本 * (1 - state.attributes['charm'] * 0.02)
+    charm = 5
+    if hasattr(state, "attributes") and isinstance(state.attributes, dict):
+        charm = state.attributes.get("charm", 5)
+    cost_discount = max(0.0, 1.0 - charm * 0.02)
+    discounted_cost_per_unit = max(1, int(base_cost_per_unit * cost_discount))
+    total_cost = discounted_cost_per_unit * quantity
 
     if state.cash < total_cost:
         return f"金钱不足！招募 {quantity} {unit_name} 需要 {total_cost} 金，当前金钱：{state.cash}"

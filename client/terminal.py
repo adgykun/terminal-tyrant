@@ -27,6 +27,10 @@ from core.engine import (
     visit_tavern,
     visit_smithy,
     visit_arena,
+    create_character,
+    reveal_appearance,
+    get_total_appearance,
+    get_battle_companion_quote,
 )
 
 TYPE_NAMES = {
@@ -185,7 +189,7 @@ def get_relation_label(val):
 
 
 def render_status(state):
-    """显示玩家当前的势力关系、军队、装备、俘虏、背包、同伴与封地状态信息。"""
+    """显示玩家当前的势力关系、三维属性与外貌、军队、装备、俘虏、背包、同伴与封地状态信息。"""
     curr_info = LOCATIONS.get(state.location, {})
     loc_name = curr_info.get("name", state.location)
     eq_bonus = sum(
@@ -197,10 +201,23 @@ def render_status(state):
     total_power = army_power + state.personal_power + eq_bonus
     current_soldiers = sum(state.troops.values())
 
+    attrs = getattr(state, "attributes", {"strength": 5, "intellect": 5, "charm": 5})
+    base_app = getattr(state, "appearance", 50)
+    eq_app_bonus = 0
+    if hasattr(state, "equipment") and isinstance(state.equipment, dict):
+        for eq_id in state.equipment.values():
+            if eq_id in EQUIPMENT:
+                eq_app_bonus += EQUIPMENT[eq_id].get("appearance_bonus", 0)
+
     print("\n" + "-" * 40)
     print("【当前详细状态】")
     print(f"当前时间: 第 {state.day} 天")
     print(f"所在位置: {loc_name}")
+    print(f"三维属性: 力量 {attrs.get('strength', 5)} | 智力 {attrs.get('intellect', 5)} | 魅力 {attrs.get('charm', 5)}")
+    if eq_app_bonus > 0:
+        print(f"外貌数值: {base_app + eq_app_bonus} ({base_app} + {eq_app_bonus} 来自装备加成)")
+    else:
+        print(f"外貌数值: {base_app}")
     print(f"金币数量: {state.gold}")
     print(f"玩家声望: {state.renown}")
     print(f"粮食储备: {state.food:.1f}")
@@ -334,6 +351,13 @@ def handle_combat_encounter(state, event_data):
     print(f"敌方预估战力: {enemy_power}  |  我方总战力: {player_power}")
     print("!" * 45)
 
+    # 战斗回合中，打印同伴的实时吐槽日志
+    companion_quotes = get_battle_companion_quote(state, "combat_round")
+    if companion_quotes:
+        print("\n【同伴战场吐槽】")
+        for q in companion_quotes:
+            print(f"  {q}")
+
     while True:
         print("\n请选择应对策略:")
         print("  1. 进攻 (高伤亡高收益)")
@@ -358,6 +382,14 @@ def handle_combat_encounter(state, event_data):
     print("\n" + "*" * 40)
     print("【战斗结算】")
     print(f"结果: {result['message']}")
+
+    # 结算后打印同伴胜败吐槽
+    end_context = "combat_victory" if result.get("victory") else "combat_defeat"
+    end_quotes = get_battle_companion_quote(state, end_context)
+    if end_quotes:
+        print("\n【同伴战后反应】")
+        for q in end_quotes:
+            print(f"  {q}")
     if result["total_casualties"] > 0:
         print("伤亡详情:")
         for t_id, cnt in result["casualties_detail"].items():
@@ -432,8 +464,42 @@ def resolve_location_target(target_arg):
     return None
 
 
+def setup_character_cli(state):
+    """开局属性点分配与外貌盲盒揭晓流程。"""
+    if getattr(state, "appearance_revealed", False):
+        return
+
+    print("\n" + "=" * 50)
+    print("【角色创建 - 属性分配】")
+    print("请为你的角色分配 15 点基础属性（力量、智力、魅力）。每项需在 1-10 之间。")
+    print("=" * 50)
+
+    while True:
+        try:
+            str_inp = input("请输入力量点数 (1-10) > ").strip()
+            int_inp = input("请输入智力点数 (1-10) > ").strip()
+            charm_inp = input("请输入魅力点数 (1-10) > ").strip()
+
+            str_pts = int(str_inp)
+            int_pts = int(int_inp)
+            charm_pts = int(charm_inp)
+
+            create_character(state, str_pts, int_pts, charm_pts)
+            print("\n属性分配成功！")
+            break
+        except Exception as e:
+            print(f"输入错误: {e}，请重新分配！\n")
+
+    print("\n" + "~" * 50)
+    print("你来到河边洗漱，第一次看清了自己的模样...")
+    reveal_msg = reveal_appearance(state)
+    print(reveal_msg)
+    print("~" * 50 + "\n")
+
+
 def start_cli(state):
     """启动主终端交互循环。"""
+    setup_character_cli(state)
     print("欢迎来到《终端暴君：三国群英》！大地图系统已启动。")
 
     while True:
