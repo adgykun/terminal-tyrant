@@ -35,6 +35,10 @@ class GameState:
         fish_inventory=None,
         battle_lost_today=False,
         npc_states=None,
+        attributes=None,
+        appearance=0,
+        appearance_revealed=False,
+        current_equipment=None,
     ):
         self.day = day
         self.gold = gold
@@ -72,6 +76,10 @@ class GameState:
                 "blacksmith": {"mood": "neutral", "last_interaction": ""},
                 "arena_host": {"mood": "neutral", "last_interaction": ""},
             }
+        self.attributes = attributes if attributes is not None else {"strength": 5, "intellect": 5, "charm": 5}
+        self.appearance = appearance
+        self.appearance_revealed = appearance_revealed
+        self.current_equipment = current_equipment if current_equipment is not None else {"clothing": None}
 
     @property
     def cash(self):
@@ -128,6 +136,10 @@ class GameState:
             "fish_inventory": dict(self.fish_inventory),
             "battle_lost_today": self.battle_lost_today,
             "npc_states": {k: dict(v) for k, v in self.npc_states.items()},
+            "attributes": dict(self.attributes),
+            "appearance": self.appearance,
+            "appearance_revealed": self.appearance_revealed,
+            "current_equipment": dict(self.current_equipment),
         }
 
     @classmethod
@@ -163,6 +175,10 @@ class GameState:
             fish_inventory=data.get("fish_inventory", {}),
             battle_lost_today=data.get("battle_lost_today", False),
             npc_states=data.get("npc_states", None),
+            attributes=data.get("attributes", {"strength": 5, "intellect": 5, "charm": 5}),
+            appearance=data.get("appearance", 0),
+            appearance_revealed=data.get("appearance_revealed", False),
+            current_equipment=data.get("current_equipment", {"clothing": None}),
         )
 
     def save(self, filepath):

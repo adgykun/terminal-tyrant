@@ -20,12 +20,12 @@ class TestEconomy(unittest.TestCase):
 
     def test_recruit_success(self):
         """测试在村庄成功招募农民。"""
-        # 橡木村(oak_village)招募农民，单价 10 金，招募 5 个，花费 50 金
+        # 橡木村(oak_village)招募农民，基础单价 10 金，默认魅力 5 享受 10% 折扣(单价 9 金)，招募 5 个，花费 45 金
         initial_gold = self.state.gold
         res = recruit(self.state, "oak_village", "peasant", 5)
 
         self.assertIn("成功招募 5 农民", res)
-        self.assertEqual(self.state.gold, initial_gold - 50)
+        self.assertEqual(self.state.gold, initial_gold - 45)
         self.assertEqual(self.state.troops["peasant"], 5)
 
     def test_recruit_insufficient_gold(self):
