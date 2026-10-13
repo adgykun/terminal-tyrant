@@ -4,7 +4,7 @@
 """
 
 import random
-from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS
+from core.data import LOCATIONS, EVENTS, UNITS, GOODS, COMPANIONS, EQUIPMENT
 
 
 def hire_companion(state, companion_id):
@@ -261,7 +261,7 @@ def move(state, target_location_id):
 
 
 def resolve_combat_simple(state, enemy_power, choice):
-    """结算简单战斗模式（无兵种克制）。
+    """结算简单战斗模式（包含装备加成、战利品与俘虏）。
 
     参数:
         state: 当前 GameState 实例
@@ -277,18 +277,26 @@ def resolve_combat_simple(state, enemy_power, choice):
             "total_casualties": int,
             "casualties_detail": dict,
             "gold_gained": int,
+            "loot_gained": list,
+            "prisoners_gained": dict,
             "message": str
         }
     """
-    player_power = calculate_army_power(state.troops)
+    eq_bonus = sum(
+        EQUIPMENT[eq_id]["power_bonus"]
+        for eq_id in state.equipment.values()
+        if eq_id in EQUIPMENT
+    )
+    player_power = calculate_army_power(state.troops) + state.personal_power + eq_bonus
     total_soldiers = sum(state.troops.values())
 
     victory = False
     gold_gained = 0
     casualties = 0
+    loot_gained = []
+    prisoners_gained = {}
 
     if choice == "retreat":
-        # 撤退：可能损失极少量兵员但绝对安全
         victory = False
         gold_gained = 0
         if total_soldiers > 0:
@@ -308,16 +316,16 @@ def resolve_combat_simple(state, enemy_power, choice):
             "total_casualties": casualties,
             "casualties_detail": loss_detail,
             "gold_gained": gold_gained,
+            "loot_gained": loot_gained,
+            "prisoners_gained": prisoners_gained,
             "message": message,
         }
 
     elif choice == "attack":
-        # 进攻：高伤亡高收益
         if player_power >= enemy_power:
             victory = True
             gold_gained = enemy_power * 5
             state.gold += gold_gained
-            # 胜仗伤亡较低
             if total_soldiers > 0:
                 damage_ratio = enemy_power / max(1, player_power)
                 casualties = min(total_soldiers, int(total_soldiers * damage_ratio * 0.3))
@@ -326,26 +334,12 @@ def resolve_combat_simple(state, enemy_power, choice):
         else:
             victory = False
             gold_gained = 0
-            # 败仗伤亡较高
             if total_soldiers > 0:
                 casualties = min(total_soldiers, max(1, int(total_soldiers * 0.5)))
             loss_detail = apply_casualties(state.troops, casualties)
             message = f"进攻受阻不敌对手。伤亡人数：{casualties}。"
 
-        state.add_log(f"选择主动进攻。{message}")
-        return {
-            "victory": victory,
-            "choice": choice,
-            "player_power": player_power,
-            "enemy_power": enemy_power,
-            "total_casualties": casualties,
-            "casualties_detail": loss_detail,
-            "gold_gained": gold_gained,
-            "message": message,
-        }
-
     elif choice == "defend":
-        # 防御：低伤亡低收益
         effective_power = int(player_power * 1.3)
         if effective_power >= enemy_power:
             victory = True
@@ -364,20 +358,154 @@ def resolve_combat_simple(state, enemy_power, choice):
             loss_detail = apply_casualties(state.troops, casualties)
             message = f"防线被打破陷入苦战。伤亡人数：{casualties}。"
 
-        state.add_log(f"选择筑防坚守。{message}")
-        return {
-            "victory": victory,
-            "choice": choice,
-            "player_power": player_power,
-            "enemy_power": enemy_power,
-            "total_casualties": casualties,
-            "casualties_detail": loss_detail,
-            "gold_gained": gold_gained,
-            "message": message,
-        }
-
     else:
         raise ValueError(f"未知的战斗决策: {choice}")
+
+    if victory:
+        # 1. 掉落装备 (30% 概率)
+        if random.random() < 0.3:
+            eq_id = random.choice(list(EQUIPMENT.keys()))
+            eq_item = dict(EQUIPMENT[eq_id])
+            state.loot.append(eq_item)
+            loot_gained.append(eq_item)
+
+        # 2. 生成俘虏 (按 50% 比例将敌方剩余兵力转化为俘虏)
+        p_count = max(1, int(enemy_power * 0.5)) if enemy_power > 0 else 0
+        if p_count > 0:
+            state.prisoners["peasant"] = state.prisoners.get("peasant", 0) + p_count
+            prisoners_gained["peasant"] = p_count
+
+    state.add_log(f"选择{'主动进攻' if choice == 'attack' else '筑防坚守'}。{message}")
+    return {
+        "victory": victory,
+        "choice": choice,
+        "player_power": player_power,
+        "enemy_power": enemy_power,
+        "total_casualties": casualties,
+        "casualties_detail": loss_detail,
+        "gold_gained": gold_gained,
+        "loot_gained": loot_gained,
+        "prisoners_gained": prisoners_gained,
+        "message": message,
+    }
+
+
+def sell_prisoners(state, location_id, unit_id, quantity):
+    """在指定地点的奴隶市场出售俘虏。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "卖出数量必须大于 0"
+
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    if not loc.get("slave_market"):
+        return f"[{loc.get('name', location_id)}] 没有奴隶市场！"
+
+    current_prisoners = state.prisoners.get(unit_id, 0)
+    unit_info = UNITS.get(unit_id, {})
+    unit_name = unit_info.get("name", unit_id)
+
+    if current_prisoners < quantity:
+        return f"俘虏数量不足！当前持有 {unit_name} 俘虏：{current_prisoners}，尝试卖出：{quantity}"
+
+    prisoner_val = unit_info.get("prisoner_value", 3)
+    income = prisoner_val * quantity
+
+    state.prisoners[unit_id] -= quantity
+    state.gold += income
+
+    msg = f"成功在 [{loc['name']}] 卖出 {quantity} 个 {unit_name} 俘虏，获得 {income} 金币。"
+    state.add_log(msg)
+    return msg
+
+
+def recruit_prisoner(state, unit_id, quantity):
+    """将俘虏招募为己方士兵。
+
+    返回:
+        str: 操作结果描述信息
+    """
+    if quantity <= 0:
+        return "招募数量必须大于 0"
+
+    if state.renown < 20:
+        return f"声望不足！招募俘虏需要 20 声望，当前声望：{state.renown}"
+
+    current_prisoners = state.prisoners.get(unit_id, 0)
+    unit_info = UNITS.get(unit_id, {})
+    unit_name = unit_info.get("name", unit_id)
+
+    if current_prisoners < quantity:
+        return f"俘虏数量不足！当前持有 {unit_name} 俘虏：{current_prisoners}，尝试招募：{quantity}"
+
+    current_army = sum(state.troops.values())
+    if current_army + quantity > state.max_army_size:
+        return f"超出带兵上限！当前兵力：{current_army}，上限：{state.max_army_size}，无法招募 {quantity} 人"
+
+    state.prisoners[unit_id] -= quantity
+    state.troops[unit_id] = state.troops.get(unit_id, 0) + quantity
+
+    msg = f"成功将 {quantity} 个 {unit_name} 俘虏招募为士兵！"
+    state.add_log(msg)
+    return msg
+
+
+def arena_fight(state, location_id, rounds):
+    """在城镇竞技场参加 1v1 擂台挑战。
+
+    返回:
+        str: 结算报告字符串
+    """
+    if rounds <= 0:
+        return "竞技场轮数必须大于 0"
+
+    loc = LOCATIONS.get(location_id)
+    if not loc:
+        return f"地点 '{location_id}' 不存在"
+
+    if not loc.get("arena"):
+        return f"[{loc.get('name', location_id)}] 没有竞技场！"
+
+    eq_bonus = sum(
+        EQUIPMENT[eq_id]["power_bonus"]
+        for eq_id in state.equipment.values()
+        if eq_id in EQUIPMENT
+    )
+    player_arena_power = state.personal_power + eq_bonus
+
+    wins = 0
+    losses = 0
+    gold_change = 0
+    renown_change = 0
+    morale_change = 0
+
+    for r in range(rounds):
+        opp_power = max(1, int(player_arena_power * random.uniform(0.8, 1.2)))
+        if player_arena_power >= opp_power:
+            wins += 1
+            gold_change += 100
+            renown_change += 5
+        else:
+            losses += 1
+            gold_change -= 50
+            morale_change -= 10
+
+    state.gold = max(0, state.gold + gold_change)
+    state.renown = max(0, state.renown + renown_change)
+    state.morale = max(0, min(100, state.morale + morale_change))
+
+    report = (
+        f"【竞技场结算】在 [{loc['name']}] 完成 {rounds} 轮擂台挑战！"
+        f"战绩: {wins} 胜 {losses} 败 | 金币: {gold_change:+d} | "
+        f"声望: {renown_change:+d} | 士气: {morale_change:+d}"
+    )
+    state.add_log(report)
+    return report
 
 
 def trade(state, location_id, action, goods_id, quantity):

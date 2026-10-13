@@ -18,6 +18,10 @@ class GameState:
         renown=0,
         food=100,
         max_army_size=20,
+        equipment=None,
+        prisoners=None,
+        personal_power=10,
+        loot=None,
     ):
         self.day = day
         self.gold = gold
@@ -31,6 +35,10 @@ class GameState:
         self.renown = renown
         self.food = food
         self.max_army_size = max_army_size
+        self.equipment = equipment if equipment is not None else {}
+        self.prisoners = prisoners if prisoners is not None else {}
+        self.personal_power = personal_power
+        self.loot = loot if loot is not None else []
 
     @property
     def cash(self):
@@ -70,6 +78,10 @@ class GameState:
             "renown": self.renown,
             "food": self.food,
             "max_army_size": self.max_army_size,
+            "equipment": dict(self.equipment),
+            "prisoners": dict(self.prisoners),
+            "personal_power": self.personal_power,
+            "loot": list(self.loot),
         }
 
     @classmethod
@@ -88,6 +100,10 @@ class GameState:
             renown=data.get("renown", 0),
             food=data.get("food", 100),
             max_army_size=data.get("max_army_size", 20),
+            equipment=data.get("equipment", {}),
+            prisoners=data.get("prisoners", {}),
+            personal_power=data.get("personal_power", 10),
+            loot=data.get("loot", []),
         )
 
     def save(self, filepath):
