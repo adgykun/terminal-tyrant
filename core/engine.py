@@ -44,6 +44,12 @@ from core.data import (
     EXECUTE_RENOWN_GAIN,
     INTIMIDATION_CAP,
     INTIMIDATION_ENEMY_REDUCTION,
+    LORDS,
+    LORD_PERSONALITY_MODIFIERS,
+    NEWS_TEMPLATES,
+    WORLD_NEWS_CHANCE,
+    WORLD_NEWS_HISTORY_LIMIT,
+    LORD_GRUDGE_DECAY,
 )
 from core.dialogues import APPEARANCE_REVEAL_TEXTS, ADMIRER_EVENT_TEXTS, BARD_STORIES, SCAVENGE_SUCCESS_TEXTS, SCAVENGE_AMBUSH_TEXTS
 from core.dialogue_engine import get_formatted_npc_dialogue, get_dialogue
@@ -237,6 +243,14 @@ def generate_quests(location_id):
         else:
             continue
 
+        # Phase 16: 领主性格影响任务报酬（慷慨者出手阔绰，吝啬者锱铢必较）
+        lord = get_faction_lord(loc.get("faction_id"))
+        if lord:
+            modifier = LORD_PERSONALITY_MODIFIERS.get(lord["personality"], 1.0)
+            quest["reward_cash"] = max(0, int(quest["reward_cash"] * modifier))
+            quest["reward_renown"] = max(0, int(quest["reward_renown"] * modifier))
+            quest["lord_id"] = lord["id"]
+
         active_quests.append(quest)
 
 
@@ -410,6 +424,10 @@ def daily_update(state):
     update_faction_relations(state)
     for loc_id in LOCATIONS:
         generate_quests(loc_id)
+
+    # 0.1 Phase 16: 生成世界新闻，并结算与玩家结怨领主的关系衰减
+    generate_world_news(state)
+    apply_lord_grudge_decay(state)
 
     # 1. 收税（领主管理，税收减半）
     tax_income = 0.0
@@ -956,7 +974,9 @@ def trade(state, location_id, action, goods_id, quantity):
 
     elif action == "sell":
         base_sell_price = price_info.get("sell_price", 0)
-        sell_price = int(base_sell_price * (1.0 + trade_bonus))
+        # Phase 16: 动态物价 —— 世界新闻（瘟疫/战争/丰收等）实时影响卖出行情
+        price_mult = get_price_multiplier(state, location_id, goods_id)
+        sell_price = int(base_sell_price * (1.0 + trade_bonus) * price_mult)
         current_amount = state.inventory.get(goods_id, 0)
         if current_amount < quantity:
             return f"{goods_name} 数量不足！当前持有：{current_amount}，尝试卖出：{quantity}"
@@ -966,6 +986,8 @@ def trade(state, location_id, action, goods_id, quantity):
         msg = f"成功卖出 {quantity} {goods_name}，获得 {total_income} 金"
         if trade_bonus > 0:
             msg += f"（含同伴交易加成 +{int(trade_bonus * 100)}%）"
+        if abs(price_mult - 1.0) > 1e-9:
+            msg += f"（{goods_name} 当前行情 ×{price_mult:.1f}）"
         state.add_log(msg)
         return msg
 
@@ -1689,6 +1711,16 @@ def execute_prisoners(state, unit_id, quantity):
     msg = (f"你下令当众处决了 {quantity} 名 {unit_name} 俘虏！你的凶名传遍四方"
            f"（威慑 +{EXECUTE_INTIMIDATION_GAIN * quantity}，声望 +{EXECUTE_RENOWN_GAIN * quantity}），"
            f"但道德大损、{hit_faction} 对你怒不可遏（关系 -{EXECUTE_RELATION_PENALTY}）。")
+
+    # Phase 16: 恩怨系统 —— 处决会令该势力的某位领主与你结下血仇
+    loc_faction = LOCATIONS.get(state.location, {}).get("faction_id")
+    if loc_faction:
+        lords = lords_of_faction(loc_faction)
+        if lords:
+            angered = random.choice(lords)
+            if provoke_lord_grudge(state, angered["id"]):
+                msg += f"\n【结下血仇】{angered['title']} 因你残害其子民而与你结怨，其家族将世代记恨。"
+
     state.add_log(msg)
     return msg
 
@@ -1704,3 +1736,126 @@ def get_loot_opinion_quotes(state):
         text = get_dialogue(comp_info, "loot_opinion", state)
         quotes.append(f"[{comp_name}]: “{text}”")
     return quotes
+
+
+# ===== Phase 16：世界真实感 —— 领主、动态新闻与恩怨系统 =====
+
+def lords_of_faction(faction_id):
+    """返回某势力旗下的全部领主（按名册插入顺序）。"""
+    return [lord for lord in LORDS.values() if lord["faction_id"] == faction_id]
+
+
+def get_faction_lord(faction_id):
+    """返回某势力的主要领主（名册首位），用于决定其治下任务报酬风格。"""
+    lords = lords_of_faction(faction_id)
+    return lords[0] if lords else None
+
+
+def provoke_lord_grudge(state, lord_id):
+    """记录与某领主结下的血仇；若已存在或领主非法则返回 False。"""
+    if lord_id not in LORDS:
+        return False
+    if not hasattr(state, "lord_grudges") or state.lord_grudges is None:
+        state.lord_grudges = []
+    if lord_id in state.lord_grudges:
+        return False
+    state.lord_grudges.append(lord_id)
+    add_log(state, f"你与 {LORDS[lord_id]['title']} 结下了血仇。")
+    return True
+
+
+def apply_lord_grudge_decay(state):
+    """每日结算：与你结怨的领主，其所属势力关系持续缓慢恶化（永不修复）。"""
+    grudges = getattr(state, "lord_grudges", [])
+    if not grudges:
+        return
+    for lord_id in grudges:
+        lord = LORDS.get(lord_id)
+        if not lord:
+            continue
+        fid = lord["faction_id"]
+        if fid in state.faction_relations:
+            state.faction_relations[fid] -= LORD_GRUDGE_DECAY
+
+
+def get_lord_stance(state, lord_id):
+    """判断某领主对你的立场：血仇 / 敌对 / 友好 / 中立。"""
+    lord = LORDS.get(lord_id)
+    if not lord:
+        return "unknown"
+    if lord_id in getattr(state, "lord_grudges", []):
+        return "grudge"
+    rel = state.faction_relations.get(lord["faction_id"], 0)
+    if rel <= -20:
+        return "hostile"
+    if rel >= 40:
+        return "friendly"
+    return "neutral"
+
+
+def meet_lord(state, lord_id):
+    """拜会领主：依据声望、性格与恩怨返回动态台词与当前立场。"""
+    lord = LORDS.get(lord_id)
+    if not lord:
+        return {"success": False, "title": "", "stance": "unknown", "dialogue": "", "message": f"查无此领主: '{lord_id}'"}
+    stance = get_lord_stance(state, lord_id)
+    npc = dict(lord)
+    if stance == "grudge":
+        npc["mood"] = "angry"
+    dialogue = get_formatted_npc_dialogue(npc, "lord_talk", state)
+    stance_label = {"grudge": "血仇", "hostile": "敌对", "friendly": "友好", "neutral": "中立"}.get(stance, "未知")
+    faction_name = FACTIONS[lord["faction_id"]]["name"]
+    msg = f"你拜会了 {lord['title']}。（所属：{faction_name}，当前立场：{stance_label}）"
+    state.add_log(msg)
+    return {"success": True, "title": lord["title"], "stance": stance, "dialogue": dialogue, "message": msg}
+
+
+def generate_world_news(state):
+    """按概率生成一条世界新闻并写入 state.world_news（会真实影响物价）。"""
+    if not hasattr(state, "world_news") or state.world_news is None:
+        state.world_news = []
+    if random.random() >= WORLD_NEWS_CHANCE:
+        return None
+    tpl = random.choice(NEWS_TEMPLATES)
+    if tpl["scope"] == "location":
+        loc_id = random.choice(list(LOCATIONS.keys()))
+        desc = tpl["template"].format(loc=LOCATIONS[loc_id]["name"])
+        location_id = loc_id
+    else:
+        fid = random.choice(list(FACTIONS.keys()))
+        desc = tpl["template"].format(faction=FACTIONS[fid]["name"])
+        location_id = None
+    entry = {
+        "id": f"news_{state.day}_{random.randint(1, 9999)}",
+        "day": state.day,
+        "type": tpl["type"],
+        "desc": desc,
+        "goods": tpl["goods"],
+        "sell_multiplier": tpl["sell_multiplier"],
+        "location_id": location_id,
+        "expires_day": state.day + tpl["duration"],
+    }
+    state.world_news.append(entry)
+    if len(state.world_news) > WORLD_NEWS_HISTORY_LIMIT:
+        state.world_news = state.world_news[-WORLD_NEWS_HISTORY_LIMIT:]
+    state.add_log(f"【世界新闻】{desc}")
+    add_log(state, f"世界新闻：{desc}")
+    return entry
+
+
+def get_active_news(state):
+    """返回当前尚未过期的世界新闻列表。"""
+    return [n for n in getattr(state, "world_news", []) if state.day <= n.get("expires_day", 0)]
+
+
+def get_price_multiplier(state, location_id, goods_id):
+    """依据当前生效的世界新闻，计算某地点某商品卖出价的倍率（最低 0.1）。"""
+    multiplier = 1.0
+    for news in get_active_news(state):
+        if news.get("goods") != goods_id:
+            continue
+        nloc = news.get("location_id")
+        if nloc is not None and nloc != location_id:
+            continue
+        multiplier *= news.get("sell_multiplier", 1.0)
+    return max(0.1, multiplier)

@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES, FISHING_GEAR, FISH_LOOT_TABLE
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES, FISHING_GEAR, FISH_LOOT_TABLE, LORDS
 from core.engine import (
     add_log,
     move,
@@ -38,6 +38,10 @@ from core.engine import (
     release_prisoners,
     execute_prisoners,
     get_loot_opinion_quotes,
+    meet_lord,
+    get_active_news,
+    get_price_multiplier,
+    get_lord_stance,
     create_character,
     reveal_appearance,
     get_total_appearance,
@@ -101,6 +105,25 @@ def format_market_info(loc_info):
         sell_p = price.get("sell_price", 0)
         items.append(f"{g_name}(买{buy_p}/卖{sell_p})")
     return f"【市场】可买卖：{', '.join(items)}"
+
+
+def format_market_news(state, location_id):
+    """格式化当前地点生效的世界新闻行情提示。"""
+    active = get_active_news(state)
+    if not active:
+        return None
+    lines = []
+    for news in active:
+        loc_scope = news.get("location_id")
+        if loc_scope is not None and loc_scope != location_id:
+            continue
+        goods_name = GOODS.get(news.get("goods"), {}).get("name", news.get("goods"))
+        mult = news.get("sell_multiplier", 1.0)
+        trend = "↑涨" if mult > 1.0 else "↓跌"
+        lines.append(f"{news['desc']}（{goods_name} 卖价 ×{mult:.1f} {trend}）")
+    if not lines:
+        return None
+    return "【世界新闻·行情】\n  " + "\n  ".join(lines)
 
 
 def format_barracks_info(loc_info):
@@ -168,6 +191,10 @@ def render_location_header(state):
     market_str = format_market_info(curr_info)
     if market_str:
         print(market_str)
+
+    news_str = format_market_news(state, state.location)
+    if news_str:
+        print(news_str)
 
     barracks_str = format_barracks_info(curr_info)
     if barracks_str:
@@ -573,6 +600,9 @@ def start_cli(state):
         print("  sell_prisoner <兵种id> <数量> - 出售俘虏")
         print("  recruit_prisoner <兵种id> <数量> - 招募俘虏为士兵")
         print("  prisoner <ransom/release/execute> <兵种id> <数量> - 勒索赎金/仁义释放/当众处决俘虏")
+        print("  news                     - 查看世界新闻与市场行情")
+        print("  lords                    - 查看大陆领主名册及对你的立场")
+        print("  meet <领主id>            - 拜会领主（依声望与恩怨输出不同态度）")
         print("  quest list               - 查看当前接取的任务及进度")
         print("  quest accept <任务id>    - 接取任务")
         print("  quest complete <任务id>  - 尝试完成任务")
@@ -873,6 +903,41 @@ def start_cli(state):
                 print(f"未知的俘虏处理动作: '{action}'（可选 ransom/release/execute）")
                 continue
             print(f"\n{res}")
+
+        elif cmd == "news":
+            active = get_active_news(state)
+            print("\n【世界新闻 · 当前生效】")
+            if active:
+                for news in active:
+                    remain = news.get("expires_day", 0) - state.day
+                    scope = LOCATIONS.get(news.get("location_id"), {}).get("name") if news.get("location_id") else "全境"
+                    print(f"  - [第{news['day']}天|{scope}|余{remain}天] {news['desc']}")
+            else:
+                print("  近来大陆风平浪静，暂无特别消息。")
+            if getattr(state, "world_news", None):
+                print("\n【近期新闻回顾】")
+                for news in state.world_news[-5:]:
+                    print(f"  - [第{news['day']}天] {news['desc']}")
+
+        elif cmd == "lords":
+            print("\n【大陆领主名册】")
+            stance_label = {"grudge": "血仇", "hostile": "敌对", "friendly": "友好", "neutral": "中立"}
+            for lord_id, lord in LORDS.items():
+                fname = FACTIONS.get(lord["faction_id"], {}).get("name", lord["faction_id"])
+                st = stance_label.get(get_lord_stance(state, lord_id), "未知")
+                print(f"  - {lord['title']} (id:{lord_id}) [{fname}] 立场:{st}")
+
+        elif cmd == "meet":
+            if len(parts) < 2:
+                print("请指定要拜会的领主ID！可先用 lords 指令查看名册。")
+                continue
+            lord_id = parts[1]
+            res = meet_lord(state, lord_id)
+            print("\n" + "-" * 40)
+            if res["success"]:
+                print(res["dialogue"])
+            print(f"提示: {res['message']}")
+            print("-" * 40)
 
         elif cmd == "tavern":
             sub_act = parts[1].lower() if len(parts) > 1 else None

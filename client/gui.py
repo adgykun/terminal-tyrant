@@ -315,6 +315,17 @@ class GUIClient:
             self.screen.blit(surf, (x_margin, y))
             y += 22
 
+        # Phase 16: 当前生效的世界新闻行情提示
+        local_news = [
+            n for n in engine.get_active_news(self.state)
+            if n.get("location_id") in (None, self.state.location)
+        ]
+        if local_news:
+            head = f"新闻: {local_news[0]['desc'][:10]}…"
+            head_surf = self.font_small.render(head, True, COLOR_WARNING)
+            self.screen.blit(head_surf, (x_margin, y))
+            y += 20
+
         y += 10
         pygame.draw.line(self.screen, COLOR_BORDER, (x_margin, y), (785, y), 1)
         y += 10
