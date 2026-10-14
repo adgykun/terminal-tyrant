@@ -501,7 +501,7 @@ class GUIClient:
         self.draw_button(btn_close, "返回地图 (ESC)", close_recruit)
 
     def render_tavern_overlay(self):
-        """渲染酒馆交互弹窗。"""
+        """渲染酒馆社交中心弹窗：老板、游吟诗人、赌徒、乞丐与逃兵。"""
         overlay_rect = pygame.Rect(100, 80, 600, 440)
         s = pygame.Surface((600, 440), pygame.SRCALPHA)
         s.fill(COLOR_MODAL_BG)
@@ -509,31 +509,65 @@ class GUIClient:
         pygame.draw.rect(self.screen, COLOR_BORDER, overlay_rect, 2, border_radius=8)
 
         y = 100
-        title_surf = self.font_large.render("—— 喧闹酒馆 ——", True, COLOR_HIGHLIGHT)
+        title_surf = self.font_large.render("—— 喧闹酒馆 · 三教九流 ——", True, COLOR_HIGHLIGHT)
         self.screen.blit(title_surf, title_surf.get_rect(centerx=400, top=y))
         y += 45
 
         res = engine.visit_tavern(self.state)
-        dlg_text = res["welcome"]
-
-        dlg_surf = self.font_main.render(dlg_text, True, COLOR_TEXT)
+        dlg_surf = self.font_main.render(res["welcome"], True, COLOR_TEXT)
         self.screen.blit(dlg_surf, (130, y))
         y += 45
 
         pygame.draw.line(self.screen, COLOR_BORDER, (130, y), (670, y), 1)
-        y += 25
+        y += 20
 
         btn_drink = pygame.Rect(160, y, 180, 40)
         def do_drink():
             ret = engine.visit_tavern(self.state, "drink", 20)
             self.message = f"{ret['dialogue']}\n{ret['message']}"
         self.draw_button(btn_drink, "喝酒 (扣20金/加士气)", do_drink)
-
         btn_rumor = pygame.Rect(380, y, 180, 40)
         def do_rumor():
             ret = engine.visit_tavern(self.state, "rumor")
             self.message = f"{ret['message']}"
         self.draw_button(btn_rumor, "打听传闻", do_rumor)
+        y += 50
+
+        btn_bard = pygame.Rect(160, y, 180, 40)
+        def do_bard():
+            ret = engine.listen_bard(self.state)
+            self.message = f"{ret['welcome']}\n{ret['message']}"
+        self.draw_button(btn_bard, "听游吟诗人 (10金)", do_bard)
+        btn_gamble = pygame.Rect(380, y, 180, 40)
+        def do_gamble():
+            ret = engine.gamble_dice(self.state, 50)
+            self.message = f"{ret['message']}\n{ret['dialogue']}"
+        self.draw_button(btn_gamble, "与赌徒掷骰 (押50金)", do_gamble)
+        y += 50
+
+        btn_beggar_give = pygame.Rect(160, y, 180, 40)
+        def do_beggar_give():
+            ret = engine.beggar_interact(self.state, "give")
+            self.message = f"{ret['dialogue']}\n{ret['message']}"
+        self.draw_button(btn_beggar_give, "施舍乞丐 (5金/加声望)", do_beggar_give)
+        btn_beggar_refuse = pygame.Rect(380, y, 180, 40)
+        def do_beggar_refuse():
+            ret = engine.beggar_interact(self.state, "refuse")
+            self.message = f"{ret['message']}"
+        self.draw_button(btn_beggar_refuse, "拒绝乞丐 (或被偷)", do_beggar_refuse)
+        y += 50
+
+        deserter_label = "逃兵已在麾下" if getattr(self.state, "deserter_recruited", False) else "招揽逃兵 (150金)"
+        btn_deserter = pygame.Rect(160, y, 180, 40)
+        def do_deserter():
+            ret = engine.recruit_deserter(self.state)
+            self.message = f"{ret['message']}"
+        self.draw_button(btn_deserter, deserter_label, do_deserter)
+        btn_decline = pygame.Rect(380, y, 180, 40)
+        def do_decline():
+            ret = engine.decline_deserter(self.state)
+            self.message = f"{ret['dialogue']}"
+        self.draw_button(btn_decline, "婉拒逃兵", do_decline)
 
         btn_close = pygame.Rect(340, 460, 120, 35)
         def close_tavern():
@@ -735,24 +769,39 @@ class GUIClient:
             self.draw_button(btn_retreat, "[3] 撤退", do_retreat)
 
         else:
-            # 战斗结束状态与延迟 2 秒自动返回或点击确认按钮
-            res_txt = "战斗胜利！" if self.combat_result.get("victory") else "战斗失败/已撤退！"
-            r_surf = self.font_main.render(res_txt, True, COLOR_SUCCESS if self.combat_result.get("victory") else COLOR_WARNING)
+            # 战斗结束状态
+            victory = self.combat_result.get("victory")
+            res_txt = "战斗胜利！" if victory else "战斗失败/已撤退！"
+            r_surf = self.font_main.render(res_txt, True, COLOR_SUCCESS if victory else COLOR_WARNING)
             self.screen.blit(r_surf, r_surf.get_rect(centerx=400, top=btn_y))
 
-            btn_confirm = pygame.Rect(340, btn_y + 35, 120, 35)
-            def finish_combat_gui():
-                self.message = self.combat_result.get("message", "战斗结束")
+            def finish_combat_gui(extra_msg=""):
+                base_msg = self.combat_result.get("message", "战斗结束") if self.combat_result else "战斗结束"
+                self.message = f"{base_msg}\n{extra_msg}" if extra_msg else base_msg
                 self.combat_event = None
                 self.combat_result = None
                 self.combat_logs = []
                 self.combat_finished_time = None
                 self.overlay = None
-            self.draw_button(btn_confirm, "返回大地图", finish_combat_gui)
 
-            # 判断是否超过 2 秒延迟自动离开
-            if self.combat_finished_time and pygame.time.get_ticks() - self.combat_finished_time > 2000:
-                finish_combat_gui()
+            if victory:
+                btn_scavenge = pygame.Rect(140, btn_y + 35, 160, 35)
+                def do_scavenge():
+                    r = engine.scavenge_battlefield(self.state, self.combat_event.get("enemy_power", 10) if self.combat_event else 10)
+                    finish_combat_gui(r["message"])
+                self.draw_button(btn_scavenge, "打扫战场 (耗时/高收益)", do_scavenge)
+                btn_withdraw = pygame.Rect(320, btn_y + 35, 160, 35)
+                def do_withdraw():
+                    r = engine.quick_withdraw(self.state)
+                    finish_combat_gui(r["message"])
+                self.draw_button(btn_withdraw, "快速撤离 (安全)", do_withdraw)
+                btn_confirm = pygame.Rect(500, btn_y + 35, 120, 35)
+                self.draw_button(btn_confirm, "返回大地图", lambda: finish_combat_gui())
+            else:
+                btn_confirm = pygame.Rect(340, btn_y + 35, 120, 35)
+                self.draw_button(btn_confirm, "返回大地图", lambda: finish_combat_gui())
+                if self.combat_finished_time and pygame.time.get_ticks() - self.combat_finished_time > 2000:
+                    finish_combat_gui()
 
     def handle_fishing(self):
         """按 F 键触发钓鱼行动。"""

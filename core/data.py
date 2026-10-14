@@ -32,7 +32,95 @@ NPC_MERCHANTS = {
         "title": "谨慎的竞技场主持人",
         "personality": "cautious",
     },
+    "bard": {
+        "id": "bard",
+        "name": "游吟诗人",
+        "title": "落魄的游吟诗人",
+        "personality": "cautious",
+    },
+    "gambler": {
+        "id": "gambler",
+        "name": "赌徒",
+        "title": "红眼的赌徒",
+        "personality": "hot_headed",
+    },
+    "beggar": {
+        "id": "beggar",
+        "name": "乞丐",
+        "title": "衣衫褴褛的乞丐",
+        "personality": "cowardly",
+    },
+    "deserter": {
+        "id": "deserter",
+        "name": "逃兵",
+        "title": "神色慌张的逃兵",
+        "personality": "cowardly",
+    },
 }
+
+# ===== Phase 14：酒馆三教九流交互配置常量 =====
+BARD_LISTEN_COST = 10
+BARD_MORALE_GAIN = 8
+GAMBLER_MIN_BET = 10
+BEGGAR_ALMS = 5
+BEGGAR_RENOWN_GAIN = 3
+BEGGAR_STEAL_CHANCE = 0.3
+BEGGAR_STEAL_AMOUNT = 15
+DESERTER_RECRUIT_COST = 150
+DESERTER_POWER_BONUS = 8
+DESERTER_ARMY_BONUS = 5
+DESERTER_RELATION_PENALTY = 15
+
+# ===== Phase 15：战场真实感 —— 打扫战场与俘虏处理配置 =====
+SCAVENGE_MIN_DAYS = 1
+SCAVENGE_MAX_DAYS = 2
+SCAVENGE_AMBUSH_CHANCE = 0.25
+SCAVENGE_GOLD_PER_ENEMY_POWER = 3
+SCAVENGE_LOOT_CHANCE = 0.4
+RANSOM_GOLD_PER_PRISONER = 60
+RANSOM_RELATION_PENALTY = 12
+RELEASE_RENOWN_PER_PRISONER = 2
+RELEASE_MORALITY_GAIN = 3
+EXECUTE_MORALITY_LOSS = 8
+EXECUTE_RELATION_PENALTY = 20
+EXECUTE_INTIMIDATION_GAIN = 3
+EXECUTE_RENOWN_GAIN = 1
+INTIMIDATION_CAP = 50
+INTIMIDATION_ENEMY_REDUCTION = 0.01
+
+# ===== Phase 16：世界真实感 —— 领主性格、动态新闻与恩怨系统 =====
+LORD_PERSONALITIES = ["honorable", "treacherous", "generous", "stingy"]
+
+LORD_PERSONALITY_MODIFIERS = {
+    "honorable": 1.0,
+    "treacherous": 0.8,
+    "generous": 1.3,
+    "stingy": 0.7,
+}
+
+LORDS = {
+    "lord_aurora": {"id": "lord_aurora", "name": "奥萝拉女爵", "title": "慷慨的奥萝拉女爵", "faction_id": "f1", "personality": "generous"},
+    "lord_gareth": {"id": "lord_gareth", "name": "铁腕加雷斯伯爵", "title": "荣誉的铁腕加雷斯伯爵", "faction_id": "f1", "personality": "honorable"},
+    "lord_baron": {"id": "lord_baron", "name": "守财的巴隆男爵", "title": "吝啬的巴隆男爵", "faction_id": "f2", "personality": "stingy"},
+    "lord_sigrid": {"id": "lord_sigrid", "name": "狡狐西格丽德女爵", "title": "背信弃义的狡狐西格丽德", "faction_id": "f2", "personality": "treacherous"},
+    "lord_ulf": {"id": "lord_ulf", "name": "血斧乌尔夫领主", "title": "荣誉的血斧乌尔夫", "faction_id": "f3", "personality": "honorable"},
+    "lord_matilda": {"id": "lord_matilda", "name": "玛蒂尔达女爵", "title": "慷慨的玛蒂尔达女爵", "faction_id": "f3", "personality": "generous"},
+}
+
+WORLD_NEWS_CHANCE = 0.15
+WORLD_NEWS_HISTORY_LIMIT = 20
+LORD_GRUDGE_DECAY = 1
+
+NEWS_TEMPLATES = [
+    {"type": "plague", "goods": "wheat", "sell_multiplier": 2.0, "duration": 3,
+     "scope": "location", "template": "{loc} 爆发黑死瘟疫，人心惶惶，四方粮价飞涨！"},
+    {"type": "bumper_harvest", "goods": "wheat", "sell_multiplier": 0.6, "duration": 2,
+     "scope": "location", "template": "{loc} 今岁风调雨顺、麦粮丰收，市面麦价应声暴跌。"},
+    {"type": "war_demand", "goods": "iron", "sell_multiplier": 1.8, "duration": 2,
+     "scope": "global", "template": "{faction} 前线告急，军械需求暴涨，铁价一路飙升！"},
+    {"type": "grand_feast", "goods": "wheat", "sell_multiplier": 1.5, "duration": 2,
+     "scope": "global", "template": "{faction} 王室大摆宴席，采买四方麦粮，行情走高。"},
+]
 
 FACTIONS = {
     "f1": {

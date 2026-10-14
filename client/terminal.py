@@ -27,6 +27,17 @@ from core.engine import (
     visit_tavern,
     visit_smithy,
     visit_arena,
+    listen_bard,
+    gamble_dice,
+    beggar_interact,
+    recruit_deserter,
+    decline_deserter,
+    quick_withdraw,
+    scavenge_battlefield,
+    ransom_prisoners,
+    release_prisoners,
+    execute_prisoners,
+    get_loot_opinion_quotes,
     create_character,
     reveal_appearance,
     get_total_appearance,
@@ -225,6 +236,7 @@ def render_status(state):
     print(f"带兵数量: {current_soldiers}/{state.max_army_size}")
     print(f"个人战力: {state.personal_power} | 装备加成: +{eq_bonus}")
     print(f"军队总战力: {army_power} | 综合战力: {total_power}")
+    print(f"道德仁义: {getattr(state, 'morality', 100)}/100 | 威慑凶名: {getattr(state, 'intimidation', 0)}")
 
     print("\n[势力关系]")
     for fid, f_info in FACTIONS.items():
@@ -423,6 +435,31 @@ def handle_combat_encounter(state, event_data):
 
     print("*" * 40)
 
+    # Phase 15: 战场真实感 —— 同伴分赃意见与「打扫战场 / 快速撤离」抉择
+    if result["victory"]:
+        loot_quotes = get_loot_opinion_quotes(state)
+        if loot_quotes:
+            print("\n【同伴分赃意见】")
+            for q in loot_quotes:
+                print(f"  {q}")
+        print("\n" + "=" * 40)
+        print("硝烟散去，你打算如何处理这片战场？")
+        print("  [1] 快速撤离 (安全，无额外收获)")
+        print("  [2] 打扫战场 (耗时 1-2 天，高收益，但可能遇袭)")
+        print("=" * 40)
+        while True:
+            sc_input = input("请选择 [1-2] > ").strip()
+            if sc_input in ["1", "快速撤离", "withdraw"]:
+                res_scavenge = quick_withdraw(state)
+                print(f"\n{res_scavenge['message']}")
+                break
+            elif sc_input in ["2", "打扫战场", "scavenge"]:
+                res_scavenge = scavenge_battlefield(state, result.get("enemy_power", 10))
+                print(f"\n{res_scavenge['message']}")
+                break
+            else:
+                print("无效的选择，请输入 1 或 2。")
+
     # 如果战斗胜利，且当前地点类型是城镇或村庄，弹出占领/掠夺/离开选项
     curr_loc = LOCATIONS.get(state.location, {})
     if result["victory"] and curr_loc.get("type") in ["town", "village"]:
@@ -497,6 +534,24 @@ def setup_character_cli(state):
     print("~" * 50 + "\n")
 
 
+def print_tavern_hub_menu(state):
+    """打印酒馆社交中心菜单：列出可交互的三教九流与对应指令。"""
+    print("\n" + "=" * 44)
+    print("【酒馆 · 三教九流】你可以与以下人物打交道：")
+    print("  tavern drink            - 请酒馆老板喝酒（回士气，老板心情变好）")
+    print("  tavern rumor            - 向老板打听小道消息")
+    print("  tavern bard             - 聆听游吟诗人弹唱（花10金，加士气并解锁世界观）")
+    print("  tavern gamble <押注>     - 与红眼赌徒掷骰子（输赢影响其心情）")
+    print("  tavern beggar give      - 施舍乞丐（花5金，加声望）")
+    print("  tavern beggar refuse    - 拒绝乞丐（可能被顺手牵羊）")
+    if getattr(state, "deserter_recruited", False):
+        print("  tavern deserter         - 逃兵已在麾下")
+    else:
+        print("  tavern deserter         - 招揽逃兵（花150金，强力但得罪各势力）")
+        print("  tavern decline          - 婉拒逃兵的投靠")
+    print("=" * 44)
+
+
 def start_cli(state):
     """启动主终端交互循环。"""
     setup_character_cli(state)
@@ -512,11 +567,12 @@ def start_cli(state):
         print("  recruit <兵种id> <数量>   - 招募士兵")
         print("  upgrade <兵种id> <数量>   - 晋升兵种")
         print("  hire <同伴id>            - 招募酒馆同伴")
-        print("  tavern [drink/rumor]     - 访问酒馆（喝酒恢复士气/听小道消息）")
+        print("  tavern [子命令]          - 访问酒馆社交中心（详见 tavern help）")
         print("  smithy [upgrade]         - 访问铁匠铺（升级装备）")
         print("  arena [fight/bet <金额>] - 访问竞技场（挑战打擂/押注）")
         print("  sell_prisoner <兵种id> <数量> - 出售俘虏")
         print("  recruit_prisoner <兵种id> <数量> - 招募俘虏为士兵")
+        print("  prisoner <ransom/release/execute> <兵种id> <数量> - 勒索赎金/仁义释放/当众处决俘虏")
         print("  quest list               - 查看当前接取的任务及进度")
         print("  quest accept <任务id>    - 接取任务")
         print("  quest complete <任务id>  - 尝试完成任务")
@@ -796,8 +852,94 @@ def start_cli(state):
             res = recruit_prisoner(state, unit_id, quantity)
             print(f"\n{res}")
 
+        elif cmd == "prisoner":
+            if len(parts) < 4:
+                print("用法: prisoner <ransom/release/execute> <兵种id> <数量>")
+                continue
+            action = parts[1].lower()
+            unit_id = parts[2]
+            try:
+                quantity = int(parts[3])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            if action in ["ransom", "勒索"]:
+                res = ransom_prisoners(state, unit_id, quantity)
+            elif action in ["release", "释放"]:
+                res = release_prisoners(state, unit_id, quantity)
+            elif action in ["execute", "处决"]:
+                res = execute_prisoners(state, unit_id, quantity)
+            else:
+                print(f"未知的俘虏处理动作: '{action}'（可选 ransom/release/execute）")
+                continue
+            print(f"\n{res}")
+
         elif cmd == "tavern":
             sub_act = parts[1].lower() if len(parts) > 1 else None
+
+            if sub_act == "help":
+                print_tavern_hub_menu(state)
+                continue
+
+            if sub_act == "bard":
+                res = listen_bard(state)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                print(f"提示: {res['message']}")
+                if res["success"]:
+                    print(res["dialogue"])
+                print("-" * 40)
+                continue
+
+            if sub_act == "gamble":
+                bet = 50
+                if len(parts) >= 3:
+                    try:
+                        bet = int(parts[2])
+                    except ValueError:
+                        print("押注必须是有效数字！例如: tavern gamble 50")
+                        continue
+                res = gamble_dice(state, bet)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                print(f"提示: {res['message']}")
+                print(res["dialogue"])
+                print("-" * 40)
+                continue
+
+            if sub_act == "beggar":
+                beggar_action = parts[2].lower() if len(parts) > 2 else "plead"
+                if beggar_action not in ["give", "refuse", "plead"]:
+                    print("乞丐交互只能是: tavern beggar give | tavern beggar refuse")
+                    continue
+                res = beggar_interact(state, beggar_action)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                if beggar_action in ["give", "refuse"]:
+                    print(res["dialogue"])
+                print(f"提示: {res['message']}")
+                print("-" * 40)
+                continue
+
+            if sub_act == "deserter":
+                res = recruit_deserter(state)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                print(f"提示: {res['message']}")
+                if res["success"]:
+                    print(res["dialogue"])
+                print("-" * 40)
+                continue
+
+            if sub_act == "decline":
+                res = decline_deserter(state)
+                print("\n" + "-" * 40)
+                print(res["welcome"])
+                print(f"提示: {res['message']}")
+                print(res["dialogue"])
+                print("-" * 40)
+                continue
+
             res = visit_tavern(state, action=sub_act)
             print("\n" + "-" * 40)
             print(res["welcome"])
@@ -805,6 +947,8 @@ def start_cli(state):
                 print(res["dialogue"])
             print(f"提示: {res['message']}")
             print("-" * 40)
+            if sub_act is None:
+                print_tavern_hub_menu(state)
 
         elif cmd == "smithy":
             sub_act = parts[1].lower() if len(parts) > 1 else None

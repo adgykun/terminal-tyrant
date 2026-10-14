@@ -39,6 +39,12 @@ class GameState:
         appearance=0,
         appearance_revealed=False,
         current_equipment=None,
+        deserter_recruited=False,
+        unlocked_lore=None,
+        morality=100,
+        intimidation=0,
+        world_news=None,
+        lord_grudges=None,
     ):
         self.day = day
         self.gold = gold
@@ -75,11 +81,21 @@ class GameState:
                 "tavern_keeper": {"mood": "neutral", "last_interaction": ""},
                 "blacksmith": {"mood": "neutral", "last_interaction": ""},
                 "arena_host": {"mood": "neutral", "last_interaction": ""},
+                "bard": {"mood": "neutral", "last_interaction": ""},
+                "gambler": {"mood": "neutral", "last_interaction": ""},
+                "beggar": {"mood": "neutral", "last_interaction": ""},
+                "deserter": {"mood": "neutral", "last_interaction": ""},
             }
         self.attributes = attributes if attributes is not None else {"strength": 5, "intellect": 5, "charm": 5}
         self.appearance = appearance
         self.appearance_revealed = appearance_revealed
         self.current_equipment = current_equipment if current_equipment is not None else {"clothing": None}
+        self.deserter_recruited = deserter_recruited
+        self.unlocked_lore = unlocked_lore if unlocked_lore is not None else []
+        self.morality = max(0, min(100, morality))
+        self.intimidation = max(0, intimidation)
+        self.world_news = world_news if world_news is not None else []
+        self.lord_grudges = lord_grudges if lord_grudges is not None else []
 
     @property
     def cash(self):
@@ -140,6 +156,12 @@ class GameState:
             "appearance": self.appearance,
             "appearance_revealed": self.appearance_revealed,
             "current_equipment": dict(self.current_equipment),
+            "deserter_recruited": self.deserter_recruited,
+            "unlocked_lore": list(self.unlocked_lore),
+            "morality": self.morality,
+            "intimidation": self.intimidation,
+            "world_news": [dict(e) for e in self.world_news],
+            "lord_grudges": list(self.lord_grudges),
         }
 
     @classmethod
@@ -179,6 +201,12 @@ class GameState:
             appearance=data.get("appearance", 0),
             appearance_revealed=data.get("appearance_revealed", False),
             current_equipment=data.get("current_equipment", {"clothing": None}),
+            deserter_recruited=data.get("deserter_recruited", False),
+            unlocked_lore=data.get("unlocked_lore", []),
+            morality=data.get("morality", 100),
+            intimidation=data.get("intimidation", 0),
+            world_news=data.get("world_news", []),
+            lord_grudges=data.get("lord_grudges", []),
         )
 
     def save(self, filepath):

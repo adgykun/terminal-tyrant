@@ -18,8 +18,34 @@ from core.data import (
     FISH_LOOT_TABLE,
     NPC_MERCHANTS,
     APPEARANCE_TIERS,
+    BARD_LISTEN_COST,
+    BARD_MORALE_GAIN,
+    GAMBLER_MIN_BET,
+    BEGGAR_ALMS,
+    BEGGAR_RENOWN_GAIN,
+    BEGGAR_STEAL_CHANCE,
+    BEGGAR_STEAL_AMOUNT,
+    DESERTER_RECRUIT_COST,
+    DESERTER_POWER_BONUS,
+    DESERTER_ARMY_BONUS,
+    DESERTER_RELATION_PENALTY,
+    SCAVENGE_MIN_DAYS,
+    SCAVENGE_MAX_DAYS,
+    SCAVENGE_AMBUSH_CHANCE,
+    SCAVENGE_GOLD_PER_ENEMY_POWER,
+    SCAVENGE_LOOT_CHANCE,
+    RANSOM_GOLD_PER_PRISONER,
+    RANSOM_RELATION_PENALTY,
+    RELEASE_RENOWN_PER_PRISONER,
+    RELEASE_MORALITY_GAIN,
+    EXECUTE_MORALITY_LOSS,
+    EXECUTE_RELATION_PENALTY,
+    EXECUTE_INTIMIDATION_GAIN,
+    EXECUTE_RENOWN_GAIN,
+    INTIMIDATION_CAP,
+    INTIMIDATION_ENEMY_REDUCTION,
 )
-from core.dialogues import APPEARANCE_REVEAL_TEXTS, ADMIRER_EVENT_TEXTS
+from core.dialogues import APPEARANCE_REVEAL_TEXTS, ADMIRER_EVENT_TEXTS, BARD_STORIES, SCAVENGE_SUCCESS_TEXTS, SCAVENGE_AMBUSH_TEXTS
 from core.dialogue_engine import get_formatted_npc_dialogue, get_dialogue
 
 _quest_id_counter = 1
@@ -624,6 +650,14 @@ def resolve_combat_simple(state, enemy_power, choice):
         intimidate_msg = "你的凶恶面容让敌人感到恐惧，敌方士气大减！"
         # 敌方士气下降可表现为敌方有效战力折减
         enemy_power = max(1, int(enemy_power * 0.85))
+
+    # Phase 15: 处决俘虏积累的威慑值按比例折减敌方战力。
+    # intimidation 默认为 0，故未处决过俘虏时战斗结算与旧版完全一致。
+    intimidation = getattr(state, "intimidation", 0)
+    if intimidation > 0:
+        reduction = min(0.5, intimidation * INTIMIDATION_ENEMY_REDUCTION)
+        enemy_power = max(1, int(enemy_power * (1 - reduction)))
+        intimidate_msg += f" 你处决俘虏的凶名传开，敌军未战先怯（敌方战力折减 {int(reduction * 100)}%）！"
 
     victory = False
     gold_gained = 0
@@ -1402,3 +1436,271 @@ def visit_arena(state, action=None, bet_amount=50):
         "dialogue": welcome_dialogue,
         "message": "你来到了热血沸腾的竞技场。",
     }
+
+
+# ===== Phase 14：酒馆真实感重构 —— 三教九流与市井生态 =====
+
+def set_npc_mood(state, npc_id, mood):
+    """安全地设置某个 NPC 的心情，若其状态条目缺失（旧存档）则自动补建。"""
+    if not hasattr(state, "npc_states") or state.npc_states is None:
+        state.npc_states = {}
+    if npc_id not in state.npc_states:
+        state.npc_states[npc_id] = {"mood": "neutral", "last_interaction": ""}
+    state.npc_states[npc_id]["mood"] = mood
+
+
+def listen_bard(state):
+    """聆听游吟诗人弹唱：花费金钱、恢复士气，并逐步解锁大陆世界观故事。"""
+    welcome_dialogue = get_formatted_npc_dialogue("bard", "bard_listen", state)
+    if state.cash < BARD_LISTEN_COST:
+        msg = f"金币不足！聆听一曲需要 {BARD_LISTEN_COST} 金，你当前只有 {state.cash} 金。"
+        return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue, "story": "", "message": msg}
+    state.cash -= BARD_LISTEN_COST
+    state.morale = min(100, state.morale + BARD_MORALE_GAIN)
+    set_npc_mood(state, "bard", "happy")
+    unheard = [s for s in BARD_STORIES if s not in state.unlocked_lore]
+    story = random.choice(unheard) if unheard else random.choice(BARD_STORIES)
+    if unheard:
+        state.unlocked_lore.append(story)
+    end_dialogue = get_formatted_npc_dialogue("bard", "bard_story_end", state)
+    msg = f"你花 {BARD_LISTEN_COST} 金听了一段弹唱，心绪为之一振（士气 +{BARD_MORALE_GAIN}）。\n{story}"
+    state.add_log(msg)
+    return {"success": True, "welcome": welcome_dialogue, "dialogue": end_dialogue, "story": story, "message": msg}
+
+
+def gamble_dice(state, bet):
+    """与赌徒掷骰子赌博：双方各掷一枚骰子比大小，输赢改变赌徒心情。"""
+    welcome_dialogue = get_formatted_npc_dialogue("gambler", "gambler_invite", state)
+    if bet < GAMBLER_MIN_BET:
+        return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+                "message": f"押注过少！赌徒嗤笑一声：最少押 {GAMBLER_MIN_BET} 金才配坐下。",
+                "result": "invalid", "net": 0, "player_die": 0, "gambler_die": 0}
+    if state.cash < bet:
+        set_npc_mood(state, "gambler", "angry")
+        return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+                "message": f"金币不足！你无法押注 {bet} 金，当前只有 {state.cash} 金。赌徒不耐烦地轰你走。",
+                "result": "invalid", "net": 0, "player_die": 0, "gambler_die": 0}
+    state.cash -= bet
+    player_die = random.randint(1, 6)
+    gambler_die = random.randint(1, 6)
+    if player_die > gambler_die:
+        state.cash += bet * 2
+        net, result = bet, "win"
+        set_npc_mood(state, "gambler", "angry")
+        result_dialogue = get_formatted_npc_dialogue("gambler", "gambler_win", state)
+        msg = f"骰子落定：你 {player_die} 点 vs 赌徒 {gambler_die} 点，你赢了！净赚 {net} 金。"
+    elif player_die < gambler_die:
+        net, result = -bet, "lose"
+        set_npc_mood(state, "gambler", "happy")
+        result_dialogue = get_formatted_npc_dialogue("gambler", "gambler_lose", state)
+        msg = f"骰子落定：你 {player_die} 点 vs 赌徒 {gambler_die} 点，你输了！损失 {bet} 金。"
+    else:
+        net, result = 0, "tie"
+        state.cash += bet
+        set_npc_mood(state, "gambler", "neutral")
+        result_dialogue = welcome_dialogue
+        msg = f"骰子落定：双方都是 {player_die} 点，平局！赌徒悻悻退还了你的押注。"
+    state.add_log(msg)
+    return {"success": result == "win", "welcome": welcome_dialogue, "dialogue": result_dialogue,
+            "message": msg, "result": result, "net": net, "player_die": player_die, "gambler_die": gambler_die}
+
+
+def beggar_interact(state, action=None):
+    """与乞丐进行道德抉择交互：施舍加声望，拒绝则可能被顺手牵羊。"""
+    welcome_dialogue = get_formatted_npc_dialogue("beggar", "beggar_plead", state)
+    if action == "give":
+        cost = BEGGAR_ALMS
+        if state.cash < cost:
+            return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+                    "message": f"你摸了摸干瘪的钱袋，连 {cost} 金的施舍都拿不出，只得讪讪走开。", "stolen": 0}
+        state.cash -= cost
+        state.renown += BEGGAR_RENOWN_GAIN
+        set_npc_mood(state, "beggar", "happy")
+        grateful = get_formatted_npc_dialogue("beggar", "beggar_grateful", state)
+        msg = f"你施舍了 {cost} 金。乞丐千恩万谢，你的仁义之名悄然传开（声望 +{BEGGAR_RENOWN_GAIN}）。"
+        state.add_log(msg)
+        return {"success": True, "welcome": welcome_dialogue, "dialogue": grateful, "message": msg, "stolen": 0}
+    elif action == "refuse":
+        set_npc_mood(state, "beggar", "angry")
+        curse = get_formatted_npc_dialogue("beggar", "beggar_curse", state)
+        stolen = 0
+        if state.cash > 0 and random.random() < BEGGAR_STEAL_CHANCE:
+            stolen = min(BEGGAR_STEAL_AMOUNT, state.cash)
+            state.cash -= stolen
+            msg = f"你冷冷拒绝。乞丐眼中闪过一丝怨毒，趁乱摸走了你 {stolen} 金！(声望未增)"
+        else:
+            msg = "你摇了摇头，转身离去。乞丐在身后咒骂了几句，却不敢真的动手。"
+        state.add_log(msg)
+        return {"success": True, "welcome": welcome_dialogue, "dialogue": curse, "message": msg, "stolen": stolen}
+    return {"success": True, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+            "message": "一个衣衫褴褛的乞丐拦在你面前，伸出枯瘦的手乞求施舍。", "stolen": 0}
+
+
+def recruit_deserter(state):
+    """招揽酒馆中的逃兵：强力但会因窝藏逃兵而得罪各势力。"""
+    welcome_dialogue = get_formatted_npc_dialogue("deserter", "deserter_hide", state)
+    if getattr(state, "deserter_recruited", False):
+        return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+                "message": "那名逃兵早已归入你的麾下，此刻正在营中当值。"}
+    if state.cash < DESERTER_RECRUIT_COST:
+        return {"success": False, "welcome": welcome_dialogue, "dialogue": welcome_dialogue,
+                "message": f"金币不足！替逃兵打点官府、收买缉兵需要 {DESERTER_RECRUIT_COST} 金，你当前只有 {state.cash} 金。"}
+    state.cash -= DESERTER_RECRUIT_COST
+    state.deserter_recruited = True
+    state.personal_power += DESERTER_POWER_BONUS
+    state.max_army_size += DESERTER_ARMY_BONUS
+    for fid in state.faction_relations:
+        state.faction_relations[fid] -= DESERTER_RELATION_PENALTY
+    set_npc_mood(state, "deserter", "happy")
+    join_dialogue = get_formatted_npc_dialogue("deserter", "deserter_join", state)
+    msg = (f"你花 {DESERTER_RECRUIT_COST} 金替逃兵打点了官府，将他收为麾下死士！"
+           f"（个人战力 +{DESERTER_POWER_BONUS}，带兵上限 +{DESERTER_ARMY_BONUS}）"
+           f"但窝藏逃兵的行径传了出去，三大势力对你的观感皆下降 {DESERTER_RELATION_PENALTY} 点。")
+    state.add_log(msg)
+    return {"success": True, "welcome": welcome_dialogue, "dialogue": join_dialogue, "message": msg}
+
+
+def decline_deserter(state):
+    """婉拒逃兵的投靠请求，仅返回其台词而不改变数值。"""
+    welcome_dialogue = get_formatted_npc_dialogue("deserter", "deserter_hide", state)
+    refuse_dialogue = get_formatted_npc_dialogue("deserter", "deserter_refuse", state)
+    return {"success": True, "welcome": welcome_dialogue, "dialogue": refuse_dialogue,
+            "message": "你婉言谢绝了逃兵的投靠，他黯然退回了酒馆的阴影里。"}
+
+
+# ===== Phase 15：战场真实感 —— 打扫战场与俘虏处理 =====
+
+def quick_withdraw(state):
+    """战后快速撤离：安全返回，不消耗额外天数、无额外收益。"""
+    msg = "你当机立断，率部快速撤离了战场，敌军残部无从追击，全军而退。"
+    state.add_log(msg)
+    add_log(state, "战后快速撤离，安全返回。")
+    return {"success": True, "message": msg, "days": 0}
+
+
+def scavenge_battlefield(state, enemy_power=10):
+    """打扫战场：耗时 1-2 天，获得高额金币与概率装备，但有概率遭遇伏击。"""
+    days = random.randint(SCAVENGE_MIN_DAYS, SCAVENGE_MAX_DAYS)
+    gold_gained = max(10, enemy_power * SCAVENGE_GOLD_PER_ENEMY_POWER)
+    state.cash += gold_gained
+    loot_gained = []
+    if random.random() < SCAVENGE_LOOT_CHANCE:
+        eq_id = random.choice(list(EQUIPMENT.keys()))
+        eq_item = dict(EQUIPMENT[eq_id])
+        state.loot.append(eq_item)
+        loot_gained.append(eq_item)
+    narr = random.choice(SCAVENGE_SUCCESS_TEXTS)
+    msg = f"你决定打扫战场。{narr}获得 {gold_gained} 金币"
+    if loot_gained:
+        msg += f"，并搜得装备 [{loot_gained[0]['name']}]"
+    ambushed = False
+    losses = 0
+    stolen_gold = 0
+    if random.random() < SCAVENGE_AMBUSH_CHANCE:
+        ambushed = True
+        ambush_text = random.choice(SCAVENGE_AMBUSH_TEXTS)
+        total_soldiers = sum(state.troops.values())
+        msg += f"\n【遭遇伏击】{ambush_text}"
+        if total_soldiers > 0 and random.random() < 0.6:
+            losses = min(total_soldiers, random.randint(1, 3))
+            apply_casualties(state.troops, losses)
+            msg += f" 混战之中，你损失了 {losses} 名士兵！"
+        else:
+            stolen_gold = min(state.cash, random.randint(20, 60))
+            state.cash -= stolen_gold
+            msg += f" 慌乱之中，被夺走了 {stolen_gold} 金币！"
+    reports = []
+    for _ in range(days):
+        advance_day(state)
+        reports.append(daily_update(state))
+    msg += f"\n打扫战场共耗时 {days} 天。"
+    state.add_log(msg)
+    add_log(state, f"打扫战场耗时 {days} 天" + ("，途中遭遇伏击" if ambushed else ""))
+    return {"success": True, "message": msg, "days": days, "gold_gained": gold_gained,
+            "loot_gained": loot_gained, "ambushed": ambushed, "reports": reports}
+
+
+def _get_prisoner_unit_name(unit_id):
+    return UNITS.get(unit_id, {}).get("name", unit_id)
+
+
+def _reduce_faction_relation(state, penalty):
+    loc = LOCATIONS.get(state.location, {})
+    faction_id = loc.get("faction_id")
+    if faction_id and faction_id in state.faction_relations:
+        state.faction_relations[faction_id] -= penalty
+        return FACTIONS.get(faction_id, {}).get("name", faction_id)
+    for fid in state.faction_relations:
+        state.faction_relations[fid] -= penalty
+    return "各大势力"
+
+
+def ransom_prisoners(state, unit_id, quantity):
+    """索要赎金：换取大量金币，但会降低势力关系。"""
+    if quantity <= 0:
+        return "数量必须大于 0"
+    have = state.prisoners.get(unit_id, 0)
+    if have < quantity:
+        unit_name = _get_prisoner_unit_name(unit_id)
+        return f"俘虏不足！当前 {unit_name} 俘虏：{have}，尝试勒索：{quantity}"
+    unit_name = _get_prisoner_unit_name(unit_id)
+    income = RANSOM_GOLD_PER_PRISONER * quantity
+    state.prisoners[unit_id] -= quantity
+    state.cash += income
+    hit_faction = _reduce_faction_relation(state, RANSOM_RELATION_PENALTY)
+    msg = f"你派使者向俘虏的家族索要赎金，成功换得 {income} 金币！但此举令 {hit_faction} 对你的观感下降 {RANSOM_RELATION_PENALTY} 点。"
+    state.add_log(msg)
+    return msg
+
+
+def release_prisoners(state, unit_id, quantity):
+    """释放俘虏：赢得声望与仁义之名（提升道德值）。"""
+    if quantity <= 0:
+        return "数量必须大于 0"
+    have = state.prisoners.get(unit_id, 0)
+    if have < quantity:
+        unit_name = _get_prisoner_unit_name(unit_id)
+        return f"俘虏不足！当前 {unit_name} 俘虏：{have}，尝试释放：{quantity}"
+    unit_name = _get_prisoner_unit_name(unit_id)
+    state.prisoners[unit_id] -= quantity
+    renown_gain = RELEASE_RENOWN_PER_PRISONER * quantity
+    morality_gain = RELEASE_MORALITY_GAIN * quantity
+    state.renown += renown_gain
+    state.morality = min(100, state.morality + morality_gain)
+    msg = f"你解开了 {quantity} 名 {unit_name} 俘虏的绳索，放他们归乡。你的仁义之名远播（声望 +{renown_gain}，道德 +{morality_gain}）。"
+    state.add_log(msg)
+    return msg
+
+
+def execute_prisoners(state, unit_id, quantity):
+    """处决俘虏：道德大损、势力震怒，但积累威慑值并折减来犯敌军战力。"""
+    if quantity <= 0:
+        return "数量必须大于 0"
+    have = state.prisoners.get(unit_id, 0)
+    if have < quantity:
+        unit_name = _get_prisoner_unit_name(unit_id)
+        return f"俘虏不足！当前 {unit_name} 俘虏：{have}，尝试处决：{quantity}"
+    unit_name = _get_prisoner_unit_name(unit_id)
+    state.prisoners[unit_id] -= quantity
+    state.morality = max(0, state.morality - EXECUTE_MORALITY_LOSS * quantity)
+    state.intimidation = min(INTIMIDATION_CAP, state.intimidation + EXECUTE_INTIMIDATION_GAIN * quantity)
+    state.renown += EXECUTE_RENOWN_GAIN * quantity
+    hit_faction = _reduce_faction_relation(state, EXECUTE_RELATION_PENALTY)
+    msg = (f"你下令当众处决了 {quantity} 名 {unit_name} 俘虏！你的凶名传遍四方"
+           f"（威慑 +{EXECUTE_INTIMIDATION_GAIN * quantity}，声望 +{EXECUTE_RENOWN_GAIN * quantity}），"
+           f"但道德大损、{hit_faction} 对你怒不可遏（关系 -{EXECUTE_RELATION_PENALTY}）。")
+    state.add_log(msg)
+    return msg
+
+
+def get_loot_opinion_quotes(state):
+    """战斗胜利后，已招募同伴依据各自性格对分赃发表意见。"""
+    quotes = []
+    for comp_id in getattr(state, "companions", []):
+        comp_info = COMPANIONS.get(comp_id)
+        if not comp_info:
+            comp_info = {"id": comp_id, "name": comp_id, "personality": "cautious"}
+        comp_name = comp_info.get("name", comp_id)
+        text = get_dialogue(comp_info, "loot_opinion", state)
+        quotes.append(f"[{comp_name}]: “{text}”")
+    return quotes
