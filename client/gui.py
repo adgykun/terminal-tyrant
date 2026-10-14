@@ -440,6 +440,21 @@ class GUIClient:
 
                 y += 45
 
+        # Phase 17: 委托加工区（村庄产原料，城镇深加工）
+        recipes = engine.list_recipes(self.state.location)
+        if recipes:
+            pygame.draw.line(self.screen, COLOR_BORDER, (130, 375), (670, 375), 1)
+            craft_title = self.font_main.render("—— 委托加工（提高利润） ——", True, COLOR_HIGHLIGHT)
+            self.screen.blit(craft_title, (130, 382))
+            cx = 130
+            for r in recipes[:2]:
+                in_name = GOODS.get(r["input_goods"], {}).get("name", r["input_goods"])
+                btn = pygame.Rect(cx, 410, 240, 32)
+                def do_craft(rid=r["id"]):
+                    self.message = engine.commission_crafting(self.state, rid)
+                self.draw_button(btn, f"{r['name']} ({r['input_amount']}{in_name}+{r['fee']}金)", do_craft)
+                cx += 250
+
         # 离开按钮
         btn_close = pygame.Rect(340, 460, 120, 35)
         def close_shop():

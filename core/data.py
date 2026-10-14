@@ -56,6 +56,12 @@ NPC_MERCHANTS = {
         "title": "神色慌张的逃兵",
         "personality": "cowardly",
     },
+    "merchant": {
+        "id": "merchant",
+        "name": "市场商人",
+        "title": "精明的市场商人",
+        "personality": "greedy",
+    },
 }
 
 # ===== Phase 14：酒馆三教九流交互配置常量 =====
@@ -394,10 +400,12 @@ LOCATIONS = {
         "arena": True,
         "slave_market": True,
         "tavern": ["c1", "c3"],
+        "facilities": ["winery"],
         "neighbors": ["oak_village", "wild_forest", "central_city"],
         "market": {
             "wheat": {"buy_price": 20, "sell_price": 15},
             "iron": {"buy_price": 80, "sell_price": 60},
+            "wine": {"buy_price": 90, "sell_price": 70},
         },
         "barracks": ["infantry", "archer"],
     },
@@ -415,10 +423,12 @@ LOCATIONS = {
         "arena": True,
         "slave_market": True,
         "tavern": ["c2"],
+        "facilities": ["forge"],
         "neighbors": ["pine_village", "wild_mountain", "central_city"],
         "market": {
             "wheat": {"buy_price": 20, "sell_price": 15},
             "iron": {"buy_price": 80, "sell_price": 60},
+            "tool": {"buy_price": 220, "sell_price": 180},
         },
         "barracks": ["infantry", "archer"],
     },
@@ -462,10 +472,13 @@ LOCATIONS = {
         "arena": True,
         "slave_market": True,
         "tavern": ["c1", "c2", "c3"],
+        "facilities": ["winery", "forge"],
         "neighbors": ["river_town", "iron_town"],
         "market": {
             "wheat": {"buy_price": 20, "sell_price": 15},
             "iron": {"buy_price": 80, "sell_price": 60},
+            "wine": {"buy_price": 90, "sell_price": 70},
+            "tool": {"buy_price": 220, "sell_price": 180},
         },
         "barracks": ["infantry", "archer"],
     },
@@ -507,15 +520,26 @@ EVENTS = {
 }
 
 GOODS = {
-    "wheat": {
-        "name": "麦子",
-        "base_price": 5,
-    },
-    "iron": {
-        "name": "铁",
-        "base_price": 20,
-    },
+    "wheat": {"name": "麦子", "base_price": 5},
+    "iron": {"name": "铁", "base_price": 20},
+    "wine": {"name": "美酒", "base_price": 70, "processed": True},
+    "tool": {"name": "铁器", "base_price": 180, "processed": True},
 }
+
+# ===== Phase 17：经济真实感 —— 产业链与讨价还价配置 =====
+RECIPES = {
+    "brew_wine": {"id": "brew_wine", "name": "酿酒", "facility": "winery",
+                  "input_goods": "wheat", "input_amount": 3, "fee": 10,
+                  "output_goods": "wine", "output_amount": 1},
+    "forge_tool": {"id": "forge_tool", "name": "打铁", "facility": "forge",
+                   "input_goods": "iron", "input_amount": 2, "fee": 20,
+                   "output_goods": "tool", "output_amount": 1},
+}
+FACILITY_NAMES = {"winery": "酿酒坊", "forge": "铁匠工坊"}
+HAGGLE_CHARM_FACTOR = 0.03
+HAGGLE_BIG_SUCCESS_RATE = 0.35
+HAGGLE_FAIL_RATE = 0.15
+HAGGLE_MAX_DISCOUNT = 0.4
 
 POLICIES = {
     "tax_high": {

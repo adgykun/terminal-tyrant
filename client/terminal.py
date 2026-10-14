@@ -1,6 +1,6 @@
 """终端交互界面模块：实现三国群英传式的大地图移动与遭遇系统。"""
 
-from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES, FISHING_GEAR, FISH_LOOT_TABLE, LORDS
+from core.data import LOCATIONS, UNITS, GOODS, COMPANIONS, EQUIPMENT, FACTIONS, POLICIES, FISHING_GEAR, FISH_LOOT_TABLE, LORDS, RECIPES, FACILITY_NAMES
 from core.engine import (
     add_log,
     move,
@@ -42,6 +42,9 @@ from core.engine import (
     get_active_news,
     get_price_multiplier,
     get_lord_stance,
+    commission_crafting,
+    list_recipes,
+    haggle_trade,
     create_character,
     reveal_appearance,
     get_total_appearance,
@@ -195,6 +198,11 @@ def render_location_header(state):
     news_str = format_market_news(state, state.location)
     if news_str:
         print(news_str)
+
+    facilities = curr_info.get("facilities", [])
+    if facilities:
+        fac_names = "、".join(FACILITY_NAMES.get(f, f) for f in facilities)
+        print(f"【加工设施】{fac_names}（输入 craft 查看可承接配方）")
 
     barracks_str = format_barracks_info(curr_info)
     if barracks_str:
@@ -603,6 +611,8 @@ def start_cli(state):
         print("  news                     - 查看世界新闻与市场行情")
         print("  lords                    - 查看大陆领主名册及对你的立场")
         print("  meet <领主id>            - 拜会领主（依声望与恩怨输出不同态度）")
+        print("  craft [配方id]           - 查看/委托加工成品（村庄产原料，城镇深加工）")
+        print("  haggle <buy/sell> <商品id> <数量> - 讨价还价交易（魅力越高议价空间越大）")
         print("  quest list               - 查看当前接取的任务及进度")
         print("  quest accept <任务id>    - 接取任务")
         print("  quest complete <任务id>  - 尝试完成任务")
@@ -935,6 +945,39 @@ def start_cli(state):
             res = meet_lord(state, lord_id)
             print("\n" + "-" * 40)
             if res["success"]:
+                print(res["dialogue"])
+            print(f"提示: {res['message']}")
+            print("-" * 40)
+
+        elif cmd == "craft":
+            if len(parts) >= 2:
+                res = commission_crafting(state, parts[1].lower())
+                print(f"\n{res}")
+            else:
+                recipes = list_recipes(state.location)
+                print("\n【可承接的加工配方】")
+                if recipes:
+                    for r in recipes:
+                        in_name = GOODS.get(r["input_goods"], {}).get("name", r["input_goods"])
+                        out_name = GOODS.get(r["output_goods"], {}).get("name", r["output_goods"])
+                        print(f"  - {r['id']} [{r['name']}]：{r['input_amount']} {in_name} + {r['fee']} 金 → {r['output_amount']} {out_name}")
+                else:
+                    print("  此地没有加工设施，需前往设有酿酒坊/铁匠工坊的城镇。")
+
+        elif cmd == "haggle":
+            if len(parts) < 4:
+                print("用法: haggle <buy/sell> <商品id> <数量>，例如: haggle sell wine 2")
+                continue
+            side = parts[1].lower()
+            goods_id = parts[2]
+            try:
+                quantity = int(parts[3])
+            except ValueError:
+                print("数量必须是有效数字！")
+                continue
+            res = haggle_trade(state, state.location, side, goods_id, quantity)
+            print("\n" + "-" * 40)
+            if res["dialogue"]:
                 print(res["dialogue"])
             print(f"提示: {res['message']}")
             print("-" * 40)

@@ -50,6 +50,12 @@ from core.data import (
     WORLD_NEWS_CHANCE,
     WORLD_NEWS_HISTORY_LIMIT,
     LORD_GRUDGE_DECAY,
+    RECIPES,
+    FACILITY_NAMES,
+    HAGGLE_CHARM_FACTOR,
+    HAGGLE_BIG_SUCCESS_RATE,
+    HAGGLE_FAIL_RATE,
+    HAGGLE_MAX_DISCOUNT,
 )
 from core.dialogues import APPEARANCE_REVEAL_TEXTS, ADMIRER_EVENT_TEXTS, BARD_STORIES, SCAVENGE_SUCCESS_TEXTS, SCAVENGE_AMBUSH_TEXTS
 from core.dialogue_engine import get_formatted_npc_dialogue, get_dialogue
@@ -1859,3 +1865,99 @@ def get_price_multiplier(state, location_id, goods_id):
             continue
         multiplier *= news.get("sell_multiplier", 1.0)
     return max(0.1, multiplier)
+
+
+# ===== Phase 17：经济真实感 —— 产业链加工与讨价还价 =====
+
+def has_facility(location_id, facility):
+    """判断某地点是否拥有指定加工设施。"""
+    return facility in LOCATIONS.get(location_id, {}).get("facilities", [])
+
+
+def list_recipes(location_id):
+    """返回某地点凭借现有设施可承接的加工配方列表。"""
+    return [r for r in RECIPES.values() if has_facility(location_id, r["facility"])]
+
+
+def commission_crafting(state, recipe_id, location_id=None):
+    """委托加工：以原料 + 手续费换取更高价值的成品。"""
+    loc_id = location_id if location_id is not None else state.location
+    recipe = RECIPES.get(recipe_id)
+    if not recipe:
+        return f"未知的加工配方 '{recipe_id}'"
+    loc = LOCATIONS.get(loc_id, {})
+    fac_name = FACILITY_NAMES.get(recipe["facility"], "工坊")
+    if not has_facility(loc_id, recipe["facility"]):
+        return f"[{loc.get('name', loc_id)}] 没有{fac_name}，无法进行 [{recipe['name']}] 加工！"
+    in_goods, in_amount, fee = recipe["input_goods"], recipe["input_amount"], recipe["fee"]
+    in_name = GOODS.get(in_goods, {}).get("name", in_goods)
+    have = state.inventory.get(in_goods, 0)
+    if have < in_amount:
+        return f"原料不足！[{recipe['name']}] 需要 {in_amount} 单位 {in_name}，当前持有 {have}"
+    if state.cash < fee:
+        return f"金钱不足！[{recipe['name']}] 委托手续费需 {fee} 金，当前只有 {state.cash} 金"
+    out_goods, out_amount = recipe["output_goods"], recipe["output_amount"]
+    out_name = GOODS.get(out_goods, {}).get("name", out_goods)
+    state.inventory[in_goods] -= in_amount
+    state.cash -= fee
+    state.inventory[out_goods] = state.inventory.get(out_goods, 0) + out_amount
+    msg = (f"你在 [{loc.get('name', loc_id)}] 的{fac_name}委托 [{recipe['name']}]："
+           f"{in_amount} {in_name} + {fee} 金手续费 → {out_amount} {out_name}。成品售价远高于原料！")
+    state.add_log(msg)
+    return msg
+
+
+def haggle_trade(state, location_id, action, goods_id, quantity):
+    """讨价还价交易：魅力决定议价空间，掷骰决定成败，并叠加世界新闻行情。不改动原 trade()。"""
+    loc = LOCATIONS.get(location_id, {})
+    market = loc.get("market", {})
+    goods_name = GOODS.get(goods_id, {}).get("name", goods_id)
+    if quantity <= 0:
+        return {"success": False, "result": "invalid", "discount": 0.0, "dialogue": "", "message": "交易数量必须大于 0"}
+    if not market or goods_id not in market:
+        return {"success": False, "result": "invalid", "discount": 0.0, "dialogue": "",
+                "message": f"{loc.get('name', location_id)} 不提供 {goods_name} 的买卖"}
+    price_info = market[goods_id]
+    price_mult = get_price_multiplier(state, location_id, goods_id)
+    if action == "buy":
+        ref_price = price_info.get("buy_price", 0) * price_mult
+    elif action == "sell":
+        ref_price = price_info.get("sell_price", 0) * price_mult
+    else:
+        return {"success": False, "result": "invalid", "discount": 0.0, "dialogue": "", "message": f"未知的交易操作 '{action}'"}
+    charm = 5
+    if getattr(state, "attributes", None):
+        charm = state.attributes.get("charm", 5)
+    base_power = min(HAGGLE_MAX_DISCOUNT, charm * HAGGLE_CHARM_FACTOR)
+    roll = random.random()
+    if roll < HAGGLE_FAIL_RATE:
+        result, discount = "fail", 0.0
+        dialogue = get_formatted_npc_dialogue("merchant", "haggle_fail", state)
+    elif roll < HAGGLE_FAIL_RATE + HAGGLE_BIG_SUCCESS_RATE:
+        result = "big"
+        discount = min(HAGGLE_MAX_DISCOUNT, base_power * 1.5)
+        dialogue = get_formatted_npc_dialogue("merchant", "haggle_win", state)
+    else:
+        result, discount = "ok", base_power
+        dialogue = get_formatted_npc_dialogue("merchant", "haggle_ok", state)
+    if action == "buy":
+        unit = max(1, int(ref_price * (1 - discount)))
+        total = unit * quantity
+        if state.cash < total:
+            return {"success": False, "result": result, "discount": discount, "dialogue": dialogue,
+                    "message": f"金钱不足！议定单价 {unit} 金，购买 {quantity} {goods_name} 需 {total} 金，当前 {state.cash} 金"}
+        state.cash -= total
+        state.inventory[goods_id] = state.inventory.get(goods_id, 0) + quantity
+        msg = f"讨价还价后买入 {quantity} {goods_name}，单价 {unit} 金（原价 {int(ref_price)}），共 {total} 金。"
+    else:
+        have = state.inventory.get(goods_id, 0)
+        if have < quantity:
+            return {"success": False, "result": result, "discount": discount, "dialogue": dialogue,
+                    "message": f"{goods_name} 数量不足！当前持有 {have}，尝试卖出 {quantity}"}
+        unit = int(ref_price * (1 + discount))
+        total = unit * quantity
+        state.inventory[goods_id] -= quantity
+        state.cash += total
+        msg = f"讨价还价后卖出 {quantity} {goods_name}，单价 {unit} 金（原价 {int(ref_price)}），共 {total} 金。"
+    state.add_log(msg)
+    return {"success": True, "result": result, "discount": discount, "dialogue": dialogue, "message": msg}
