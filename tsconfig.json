@@ -1,15 +1,21 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "rootDir": "./src",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
     "outDir": "./dist",
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "allowImportingTsExtensions": false,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
   },
   "include": ["src/**/*"]
 }
