@@ -3,9 +3,12 @@ import {
   get_map_locations, plan_travel_path, travel_eta_days,
   get_current_location, compute_content_bounds, nearest_location_id,
   FREE_MOVE_SPEED, FREE_MOVE_DAY_DISTANCE,
+  resolve_combat_simple,
 } from "../core/engine";
 import { TERRAIN_COLORS, get_region } from "../core/world_regions";
 import type { GameState } from "../core/state";
+import { generateTerrainCanvas, type TerrainLayer } from "../core/terrain_noise";
+import { generateMapUnits, advanceUnits, type MapUnit } from "../core/map_units";
 
 // === 常量 ===
 const ARRIVE_RADIUS = 3.5;
@@ -20,6 +23,9 @@ const FACTION_COLORS: Record<string, string> = {
 const LOC_LABEL: Record<string, string> = {
   village: "\u6751\u5e98", town: "\u9547\u57ce", wild: "\u91ce\u5916",
   pass: "\u5173\u9698", port: "\u6e2f\u53e3",
+};
+const UNIT_LABEL: Record<string, string> = {
+  army: "\u519b\u961f", caravan: "\u5546\u961f", bandit: "\u52ab\u532a", npc: "\u65c5\u4eba",
 };
 
 // === 类型 ===
@@ -37,6 +43,11 @@ interface WorldMapCanvasProps {
   onMove: (targetId: string) => void;
   onEnterTown?: () => void;
   onFreeMove?: (dist: number, onRoad: boolean) => void;
+  onUnitPicked?: (unit: MapUnit) => void;
+  onUnitCombat?: (enemyPower: number, desc: string) => void; // 打移动劫匪/攻城
+  onUnitInteract?: (unit: MapUnit) => void;   // 商队交易/NPC聊天（壳）
+  onPassBattle?: (garrison: number) => void;   // 关隘守军战斗（修死按钮）
+  onCamp?: () => void;                          // 扎营（修死按钮）
 }
 
 // === 工具 ===
@@ -49,9 +60,11 @@ function lerpPt(a: { x: number; y: number }, b: { x: number; y: number }, t: num
 }
 
 // === 主组件 ===
-export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: WorldMapCanvasProps) {
+export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const miniRef = useRef<HTMLCanvasElement>(null);
+  const miniFrameRef = useRef(0);
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
 
   // 相机
@@ -62,6 +75,12 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
   const travelRef = useRef<TravelState>({ path: [], legIndex: 0, legT: 0, active: false });
   // 目标标记
   const targetRef = useRef<{ x: number; y: number } | null>(null);
+  // 程序化地形 + AI 单位（活地图）
+  const terrainRef = useRef<TerrainLayer | null>(null);
+  const unitsRef = useRef<MapUnit[]>([]);
+  const [selUnit, setSelUnit] = useState<MapUnit | null>(null); // 点选单位交互
+  const selUnitRef = useRef<MapUnit | null>(null);
+  const combatBusyRef = useRef(false);
   // 拖拽
   const dragRef = useRef<{ startX: number; startY: number; camX: number; camY: number; moved: boolean; startT: number } | null>(null);
   // 触摸
@@ -78,6 +97,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
   const [travelMode, setTravelMode] = useState<"free" | "road">("free");
   const travelModeRef = useRef<"free" | "road">("free");
   const freeRef = useRef<{ active: boolean; tx: number; ty: number; distAcc: number }>({ active: false, tx: 0, ty: 0, distAcc: 0 });
+  const terrainSeedRef = useRef(0);
   const [dayToast, setDayToast] = useState(0);
 
   // 地点缓存
@@ -90,6 +110,16 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
   // 当前所在地
   const curLoc = get_current_location(state);
   const region = state.selected_region ? get_region(state.selected_region) : null;
+  // === 区域变化：生成程序化地形 + AI 单位（活地图） ===
+  useEffect(() => {
+    const seed = (state.selected_region ? state.selected_region.length * 131 : 7) + 1000;
+    if (terrainSeedRef.current === seed) return;
+    terrainSeedRef.current = seed;
+    terrainRef.current = generateTerrainCanvas(region, seed);
+    const usable = (locations as any[]).filter((l) => typeof l.x === "number");
+    unitsRef.current = generateMapUnits(region, usable, seed);
+  }, [state.selected_region, locations]);
+  useEffect(() => { selUnitRef.current = selUnit; }, [selUnit]);
 
   // === 初始化玩家位置 ===
   useEffect(() => {
@@ -227,6 +257,17 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
       ctx.scale(cam.zoom * 2, cam.zoom * 2);
       ctx.translate(-cam.x, -cam.y);
 
+      // 程序化地形（离屏，随镜头平移/缩放）
+      if (terrainRef.current) {
+        const tl = terrainRef.current;
+        ctx.drawImage(tl.canvas, tl.worldX, tl.worldY, tl.worldW, tl.worldH);
+      }
+      // AI 单位逐帧推进（活地图）
+      {
+        const usable = (locations as any[]).filter((l) => typeof l.x === "number");
+        if (unitsRef.current.length) advanceUnits(unitsRef.current, dt, usable, 0);
+      }
+
       // 河流（区域模式）
       if (region && region.terrain.rivers) {
         ctx.strokeStyle = "#4a7cb8";
@@ -265,6 +306,42 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
       }
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
+
+      // AI 单位 token（活地图）：画在地点层下，玩家旗帜上
+      if (unitsRef.current.length) {
+        const zoom = cam.zoom * 2;
+        for (const u of unitsRef.current) {
+          const uisSel = selUnitRef.current?.id === u.id;
+          // 类型图标（小三角/方块区分）+ 势力色环 + 名字
+          ctx.beginPath();
+          ctx.arc(u.x, u.y, 0.55, 0, Math.PI * 2);
+          ctx.fillStyle = u.color;
+          ctx.fill();
+          ctx.lineWidth = uisSel ? 0.22 : 0.1;
+          ctx.strokeStyle = uisSel ? "#ffffff" : "#1a1410";
+          ctx.stroke();
+          // 类型标记（内嵌符号）
+          ctx.fillStyle = "#fff";
+          ctx.font = "0.55px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const sym = u.type === "army" ? "斛" : u.type === "caravan" ? "车" : u.type === "bandit" ? "勾" : "行";
+          ctx.fillText(sym, u.x, u.y + 0.02);
+          // 选中外圈 + 名字标签（仅选中/悬停时显示）
+          if (uisSel) {
+            ctx.beginPath();
+            ctx.arc(u.x, u.y, 1.4, 0, Math.PI * 2);
+            ctx.strokeStyle = u.color;
+            ctx.lineWidth = 0.12;
+            ctx.stroke();
+            ctx.font = "0.8px sans-serif";
+            ctx.fillStyle = "#fff";
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText((UNIT_LABEL[u.type] || "") + " \u00b7 " + u.name, u.x, u.y - 1.6);
+          }
+        }
+        ctx.textBaseline = "alphabetic";
+      }
 
       // 地点图标
       for (const loc of locations as any[]) {
@@ -425,6 +502,17 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
     setEtaDays(0);
   }, []);
 
+  // === 点选单位 token（优先于移动） ===
+  const pickUnitAt = useCallback((wx: number, wy: number, radius = 2.5) => {
+    let best: MapUnit | null = null;
+    let bestD = radius;
+    for (const u of unitsRef.current) {
+      const d = Math.hypot(u.x - wx, u.y - wy);
+      if (d < bestD) { bestD = d; best = u; }
+    }
+    return best;
+  }, []);
+
   // === 鼠标事件 ===
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -471,11 +559,14 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
       const duration = performance.now() - startT;
       dragRef.current = null;
       if (!moved && duration < 300) {
-        // 单击 → 设目标
         const rect = cvs.getBoundingClientRect();
         const sx = (e.clientX - rect.left) * (window.devicePixelRatio || 1);
         const sy = (e.clientY - rect.top) * (window.devicePixelRatio || 1);
         const { wx, wy } = screenToWorld(sx, sy);
+        // 优先点选单位 token
+        const uHit = pickUnitAt(wx, wy, 2.5);
+        if (uHit) { setSelUnit(uHit); onUnitPicked?.(uHit); return; }
+        setSelUnit(null);
         const hit = nearest_location_id(locations as any[], wx, wy, HIT_RADIUS);
         startTravel(hit, wx, wy);
       }
@@ -537,11 +628,13 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
         const duration = performance.now() - startT;
         dragRef.current = null;
         if (!moved && duration < 300) {
-          // 轻点 → 选目标
           const rect = cvs.getBoundingClientRect();
           const sx = (touchRef.current.lastTapX - rect.left) * (window.devicePixelRatio || 1);
           const sy = (touchRef.current.lastTapY - rect.top) * (window.devicePixelRatio || 1);
           const { wx, wy } = screenToWorld(sx, sy);
+          const uHit = pickUnitAt(wx, wy, 3);
+          if (uHit) { setSelUnit(uHit); onUnitPicked?.(uHit); return; }
+          setSelUnit(null);
           const hit = nearest_location_id(locations as any[], wx, wy, HIT_RADIUS);
           startTravel(hit, wx, wy);
         }
@@ -577,6 +670,48 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [cancelTravel]);
+
+  // === 小地图（右下角缩略）===
+  useEffect(() => {
+    const cvs = miniRef.current;
+    if (!cvs) return;
+    const MW = 120, MH = 120;
+    cvs.width = MW; cvs.height = MH;
+    const mctx = cvs.getContext("2d")!;
+    let tick = 0;
+    const id = setInterval(() => {
+      tick++;
+      if (tick % 6 !== 0) return; // 每 6 帧刷一次小地图
+      mctx.clearRect(0, 0, MW, MH);
+      mctx.fillStyle = "#0e1420";
+      mctx.fillRect(0, 0, MW, MH);
+      // 世界 0~100 → 小地图 0~120
+      const sx = (wx: number) => (wx / 100) * MW;
+      const sy = (wy: number) => (wy / 100) * MH;
+      // 地点
+      for (const loc of locations as any[]) {
+        mctx.fillStyle = "#6b8f4a";
+        mctx.fillRect(sx(loc.x) - 1, sy(loc.y) - 1, 2, 2);
+      }
+      // AI 单位
+      for (const u of unitsRef.current) {
+        mctx.fillStyle = u.color;
+        mctx.beginPath(); mctx.arc(sx(u.x), sy(u.y), 1.5, 0, Math.PI * 2); mctx.fill();
+      }
+      // 玩家
+      const pp = playerPosRef.current;
+      mctx.fillStyle = "#d4a843";
+      mctx.beginPath(); mctx.arc(sx(pp.x), sy(pp.y), 3, 0, Math.PI * 2); mctx.fill();
+      mctx.strokeStyle = "#fff"; mctx.lineWidth = 0.5; mctx.stroke();
+      // 视口框
+      const cam = camRef.current;
+      const halfW = (MW * 0.0); // 简单画相机中心十字
+      mctx.strokeStyle = "rgba(255,255,255,0.4)";
+      mctx.beginPath(); mctx.moveTo(sx(cam.x) - 6, sy(cam.y)); mctx.lineTo(sx(cam.x) + 6, sy(cam.y));
+      mctx.moveTo(sx(cam.x), sy(cam.y) - 6); mctx.lineTo(sx(cam.x), sy(cam.y) + 6); mctx.stroke();
+    }, 100);
+    return () => clearInterval(id);
+  }, [locations, unitsRef.current]);
 
   // === 缩放按钮 ===
   const zoomIn = useCallback(() => { camRef.current.zoom = Math.min(MAX_ZOOM, camRef.current.zoom * 1.3); }, []);
@@ -618,6 +753,35 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
         </div>
       )}
 
+      {/* 选中单位交互面板 */}
+      {selUnit && (
+        <div style={{ position: "absolute", left: 8, bottom: 40, background: "rgba(20,28,40,0.92)", border: "1px solid " + selUnit.color, borderRadius: 8, padding: "8px 12px", color: "#eee", fontSize: 12, maxWidth: 220, zIndex: 20 }}>
+          <div style={{ fontWeight: 700, color: selUnit.color, marginBottom: 4 }}>
+            {UNIT_LABEL[selUnit.type]} · {selUnit.name}
+          </div>
+          <div style={{ color: "#aaa", marginBottom: 8, fontSize: 11 }}>
+            {selUnit.type === "army" && "各势力驻军/行军"}
+            {selUnit.type === "caravan" && "沿商路运送货物"}
+            {selUnit.type === "bandit" && "野外游荡，可遭劫掠"}
+            {selUnit.type === "npc" && "游历各地的人物"}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {selUnit.type === "bandit" && (
+              <button className="wmc-btn wmc-btn-danger" onClick={() => onUnitCombat?.(10, `遭遇 ${selUnit.name}`)}>交战</button>
+            )}
+            {selUnit.type === "army" && (
+              <button className="wmc-btn" onClick={() => onUnitCombat?.(15, `与 ${selUnit.name} 交战`)}>交战</button>
+            )}
+            {(selUnit.type === "caravan" || selUnit.type === "npc") && (
+              <button className="wmc-btn" onClick={() => onUnitInteract?.(selUnit)}>
+                {selUnit.type === "caravan" ? "交易" : "交谈"}
+              </button>
+            )}
+            <button className="wmc-btn wmc-btn-ghost" onClick={() => setSelUnit(null)}>关闭</button>
+          </div>
+        </div>
+      )}
+
       {/* 跨天飘字 */}
       {dayToast > 0 && (
         <div className="wmc-day-toast">+{dayToast} 天</div>
@@ -645,18 +809,18 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
             </button>
           )}
           {(nearLoc as any).type === "pass" && (nearLoc as any).garrison_power > 0 && (
-            <button className="wmc-btn wmc-btn-danger">
+            <button className="wmc-btn wmc-btn-danger" onClick={() => onPassBattle?.((nearLoc as any).garrison_power)}>
               战斗 (守军 {(nearLoc as any).garrison_power})
             </button>
           )}
-          <button className="wmc-btn wmc-btn-ghost">扎营</button>
+          <button className="wmc-btn wmc-btn-ghost" onClick={() => onCamp?.()}>扎营</button>
         </div>
       )}
 
       {/* 缩放控件 */}
       <div className="wmc-zoom-controls">
         <button className="wmc-zoom-btn" onClick={zoomIn} title="放大">+</button>
-        <button className="wmc-zoom-btn" onClick={zoomOut} title="缩小">2212</button>
+        <button className="wmc-zoom-btn" onClick={zoomOut} title="缩小">−</button>
         <button className="wmc-zoom-btn" onClick={zoomFit} title="适应">适配</button>
       </div>
 
@@ -671,6 +835,11 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove }: World
       {region && (
         <div className="wmc-region-badge">{region.name}</div>
       )}
+
+      {/* 小地图 */}
+      <div style={{ position: "absolute", right: 8, bottom: 8, background: "#0e1420", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4, padding: 2, zIndex: 10 }}>
+        <canvas ref={miniRef} style={{ width: 120, height: 120, display: "block" }} />
+      </div>
     </div>
   );
 }
