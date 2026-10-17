@@ -1,0 +1,177 @@
+import type { GameState } from "../core/state";
+import { GOODS, UNITS, EQUIPMENT, FACILITY_NAMES } from "../core/data";
+import {
+  get_current_location,
+  rest,
+  trade,
+  recruit,
+  visit_tavern,
+  visit_smithy,
+  visit_arena,
+  gamble_dice,
+  fish,
+  sell_fish,
+  buy_gear,
+} from "../core/engine";
+import { get_region } from "../core/world_regions";
+import { Castle, Coins, Sword, Beer, Dices, Wrench, Fish, Bed, ArrowLeft, Users } from "lucide-react";
+
+interface TownSceneProps {
+  state: GameState;
+  performAction: (action: (...args: any[]) => any, ...args: any[]) => any;
+  setView: (view: any) => void;
+}
+
+const locTypeLabel: Record<string, string> = {
+  village: "村庄",
+  town: "城镇",
+  port: "港口",
+  wild: "野外",
+  pass: "关隘",
+};
+
+export function TownScene({ state, performAction, setView }: TownSceneProps) {
+  const loc: any = get_current_location(state);
+  if (!loc) {
+    return (
+      <div className="panel">
+        <div className="panel-title"><Castle size={22} /> 城镇</div>
+        <div className="text-muted text-sm">当前地点信息缺失。</div>
+        <button className="primary mt-12" onClick={() => setView("map")}>
+          返回地图
+        </button>
+      </div>
+    );
+  }
+
+  const region = state.selected_region ? get_region(state.selected_region) : null;
+  const goodsIds = Object.keys(loc.market ?? {});
+  const barracksUnits = loc.barracks ?? [];
+  const hasTavern = Array.isArray(loc.tavern) && loc.tavern.length > 0;
+  const hasArena = !!loc.arena;
+  const facilities: string[] = loc.facilities ?? [];
+  const hasSmithy = facilities.includes("forge");
+  const isPort = loc.type === "port";
+
+  return (
+    <div>
+      <div className="panel">
+        <div className="panel-title">
+          <Castle size={22} /> {region ? `${region.name} · ` : ""}{loc.name}
+        </div>
+        <div className="text-sm text-secondary mb-12">
+          {locTypeLabel[loc.type] ?? loc.type}
+          {loc.faction_id && ` · 隶属 ${loc.faction_id}`}
+        </div>
+        <button className="primary" onClick={() => setView("map")}>
+          <ArrowLeft size={16} style={{ display: "inline", marginRight: "4px" }} />返回大地图
+        </button>
+      </div>
+
+      {goodsIds.length > 0 && (
+        <div className="panel">
+          <div className="panel-title"><Coins size={22} /> 市场</div>
+          <div className="card-grid">
+            {goodsIds.map((gid) => {
+              const info = loc.market[gid];
+              const owned = state.inventory[gid] ?? 0;
+              return (
+                <div key={gid} className="card">
+                  <div className="card-title">
+                    {GOODS[gid]?.name ?? gid}
+                    <span className="text-muted text-sm"> ×{owned}</span>
+                  </div>
+                  <div className="card-desc text-sm mb-8">
+                    买 {info.buy_price} / 卖 {info.sell_price} 金
+                  </div>
+                  <div className="flex-row gap-8">
+                    <button className="primary" onClick={() => performAction(trade, state.location, "buy", gid, 1)}>买 1</button>
+                    <button className="secondary" onClick={() => performAction(trade, state.location, "sell", gid, 1)} disabled={owned < 1}>卖 1</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {barracksUnits.length > 0 && (
+        <div className="panel">
+          <div className="panel-title"><Sword size={22} /> 兵营</div>
+          <div className="card-grid">
+            {barracksUnits.map((uid: string) => {
+              const u = UNITS[uid];
+              if (!u) return null;
+              const count = state.troops[uid] ?? 0;
+              return (
+                <div key={uid} className="card">
+                  <div className="card-title">{u.name}<span className="text-muted text-sm"> ×{count}</span></div>
+                  <div className="card-desc text-sm mb-8">招募 {u.recruit_cost} 金 · 战力 {u.power}</div>
+                  <button className="primary" onClick={() => performAction(recruit, state.location, uid, 1)}>招募 1</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {(hasTavern || hasArena || hasSmithy || isPort) && (
+        <div className="panel">
+          <div className="panel-title"><Users size={22} /> 设施与人物</div>
+          <div className="flex-col gap-12">
+            {hasTavern && (
+              <div>
+                <div className="text-bold mb-8"><Beer size={16} style={{ display: "inline", marginRight: "6px" }} />酒馆</div>
+                <div className="flex-row gap-8">
+                  <button className="primary" onClick={() => performAction(visit_tavern, "drink", 20)}>喝酒（-20 金）</button>
+                  <button className="secondary" onClick={() => performAction(visit_tavern, "rumor")}>打听传闻</button>
+                </div>
+              </div>
+            )}
+            {hasArena && (
+              <div>
+                <div className="text-bold mb-8"><Sword size={16} style={{ display: "inline", marginRight: "6px" }} />竞技场</div>
+                <div className="flex-row gap-8">
+                  <button className="primary" onClick={() => performAction(visit_arena, "fight")}>挑战比武</button>
+                  <button className="secondary" onClick={() => performAction(visit_arena, "bet", 50)}>下注（-50 金）</button>
+                </div>
+              </div>
+            )}
+            {hasSmithy && (
+              <div>
+                <div className="text-bold mb-8"><Wrench size={16} style={{ display: "inline", marginRight: "6px" }} />{FACILITY_NAMES["forge"] ?? "铁匠"} </div>
+                <button className="primary" onClick={() => performAction(visit_smithy, "upgrade")}>装备升级</button>
+              </div>
+            )}
+            {isPort && (
+              <div>
+                <div className="text-bold mb-8"><Fish size={16} style={{ display: "inline", marginRight: "6px" }} />渔场</div>
+                <div className="flex-row gap-8">
+                  <button className="primary" onClick={() => performAction(fish, state.location)}>捕鱼</button>
+                  {state.fish_inventory && Object.keys(state.fish_inventory).length > 0 && (
+                    <button className="secondary" onClick={() => performAction(sell_fish, Object.keys(state.fish_inventory)[0], 1)}>卖出渔获</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel-title">行动</div>
+        <div className="flex-row gap-8" style={{ flexWrap: "wrap" }}>
+          <button className="primary" onClick={() => performAction(rest)}>
+            <Bed size={16} style={{ display: "inline", marginRight: "4px" }} />休息（+士气）
+          </button>
+          <button className="secondary" onClick={() => performAction(gamble_dice, 20)}>
+            <Dices size={16} style={{ display: "inline", marginRight: "4px" }} />赌一把（-20 金）
+          </button>
+          <button className="ghost" onClick={() => performAction(buy_gear, "w1", 1)}>
+            买装备
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
