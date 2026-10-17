@@ -109,7 +109,8 @@ function assignTarget(u: MapUnit, usable: any[], rnd: () => number) {
 export function advanceUnits(
   units: MapUnit[],
   dt: number,
-  usable: any[]
+  usable: any[],
+  _seed: number
 ) {
   const rnd = Math.random;
   for (const u of units) {
