@@ -2438,3 +2438,87 @@ export function exit_region(state: any, classic_location_id: string): string {
     state.add_log(`你离开了区域，回到了 ${target.name}。`);
     return `已返回大地图：${target.name}`;
 }
+
+/* ===== 老虎机（slots）===== */
+export type SlotSymbol = 'seven' | 'cherry' | 'bell' | 'star' | 'bar';
+export type SlotResult = 'jackpot' | 'win' | 'lose';
+export interface SlotSpinResult {
+    success: boolean;
+    message: string;
+    symbols: [SlotSymbol, SlotSymbol, SlotSymbol] | null;
+    payout: number;
+    net: number;
+    result: SlotResult | null;
+}
+
+/** 每轴权重，总重 20：樱桃最常见，7 最稀有 */
+const SLOT_REEL_WEIGHTS: [SlotSymbol, number][] = [
+    ['cherry', 6], ['bell', 5], ['star', 4], ['bar', 3], ['seven', 2],
+];
+const SLOT_TOTAL_WEIGHT = SLOT_REEL_WEIGHTS.reduce((s, [, w]) => s + w, 0); // 20
+
+/** 倍率表：triple=三同，pair=两同（0 = 两同不派彩，制造“差一格”） */
+export const SLOT_PAYOUTS: Record<SlotSymbol, { triple: number; pair: number }> = {
+    seven:  { triple: 50, pair: 4 },
+    bar:    { triple: 20, pair: 2 },
+    star:   { triple: 10, pair: 1 },
+    bell:   { triple: 6,  pair: 0 },
+    cherry: { triple: 4,  pair: 1 },
+};
+
+/** 符号显示名（中文） */
+export const SLOT_NAMES: Record<SlotSymbol, string> = {
+    seven: '幸运7', bar: 'BAR', star: '星', bell: '铃', cherry: '樱桃',
+};
+
+function roll_slot_reel(): SlotSymbol {
+    let r = Math.floor(Math.random() * SLOT_TOTAL_WEIGHT);
+    for (const [sym, w] of SLOT_REEL_WEIGHTS) {
+        if (r < w) return sym;
+        r -= w;
+    }
+    return SLOT_REEL_WEIGHTS[0][0];
+}
+
+/** 拉杆：扣 bet → 采样 3 轴 → 三同大奖/两同小奖/全异输。纯函数，结果同步返回。 */
+export function spin_slots(state: any, bet: number): SlotSpinResult {
+    const fail = (message: string): SlotSpinResult => ({ success: false, message, symbols: null, payout: 0, net: 0, result: null });
+    if (!Number.isFinite(bet) || bet < GAMBLER_MIN_BET) {
+        return fail(`押注过少！最少押 ${GAMBLER_MIN_BET} 金。`);
+    }
+    if (state.cash < bet) {
+        return fail(`金钱不足！拉杆需要 ${bet} 金，当前 ${state.cash} 金。`);
+    }
+    state.cash -= bet;
+    const symbols: [SlotSymbol, SlotSymbol, SlotSymbol] = [roll_slot_reel(), roll_slot_reel(), roll_slot_reel()];
+    const [a, b, c] = symbols;
+    let result: SlotResult;
+    let mult = 0;
+    let pairSym: SlotSymbol = a;
+    if (a === b && b === c) {
+        result = 'jackpot';
+        mult = SLOT_PAYOUTS[a].triple;
+    } else if (a === b || b === c || a === c) {
+        result = 'win';
+        pairSym = (a === b || a === c) ? a : b;
+        mult = SLOT_PAYOUTS[pairSym].pair; // 铃 pair=0 → 不派彩
+    } else {
+        result = 'lose';
+        mult = 0;
+    }
+    const payout = bet * mult;
+    if (payout > 0) state.cash += payout;
+    const net = payout - bet;
+    let message: string;
+    if (result === 'jackpot') {
+        message = `老虎机大奖！三枚 ${SLOT_NAMES[a]} 连成一线，赢得 ${payout} 金（净 ${net >= 0 ? '+' : ''}${net}）。`;
+    } else if (result === 'win' && mult > 0) {
+        message = `老虎机停到两枚 ${SLOT_NAMES[pairSym]}，小赢 ${payout} 金（净 ${net >= 0 ? '+' : ''}${net}）。`;
+    } else if (result === 'win') {
+        message = `两枚 ${SLOT_NAMES[pairSym]} 差一格就中，这次没派彩（-${bet} 金）。`;
+    } else {
+        message = `老虎机转完了，没中（-${bet} 金）。`;
+    }
+    state.add_log?.(message);
+    return { success: true, message, symbols, payout, net, result };
+}

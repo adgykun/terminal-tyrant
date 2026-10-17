@@ -16,6 +16,7 @@ import {
   buy_gear,
 } from "../core/engine";
 import { get_region } from "../core/world_regions";
+import SlotMachine from "./SlotMachine";
 import { Castle, Coins, Sword, Beer, Dices, Wrench, Fish, Bed, ArrowLeft, Users } from "lucide-react";
 
 interface TownSceneProps {
@@ -154,6 +155,9 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
                 <div className="flex-row gap-8">
                   <button className="primary" onClick={() => performAction(visit_tavern, "drink", 20)}>喝酒（-20 金）</button>
                   <button className="secondary" onClick={() => performAction(visit_tavern, "rumor")}>打听传闻</button>
+                </div>
+                <div className="mt-12">
+                  <SlotMachine cash={state.cash} performAction={performAction} />
                 </div>
               </div>
             )}
