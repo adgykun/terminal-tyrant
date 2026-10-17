@@ -338,7 +338,7 @@ export function generate_quests(location_id: string): void {
 
 /** 玩家接取城镇任务板上的任务。 */
 export function accept_quest(state: any, quest_id: string): string {
-    const loc = LOCATIONS[state.location] || {};
+    const loc = get_current_location(state) ?? {};
     const active_quests = loc.active_quests || [];
 
     let target_quest: any = null;
@@ -469,7 +469,7 @@ export function hire_companion(state: any, companion_id: string): string {
 
 /** 掠夺或占领地点。 */
 export function conquer_location(state: any, location_id: string, action: string): string {
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
     }
@@ -522,7 +522,7 @@ export function daily_update(state: any): string {
     // 1. 收税（领主管理，税收减半）
     let tax_income = 0.0;
     for (const fief_id of state.fiefs) {
-        const f_info = LOCATIONS[fief_id] || {};
+        const f_info = get_location(state, fief_id) ?? {};
         const base_tax = f_info.tax_income ?? 0;
         if (f_info.owner === "lord") {
             tax_income += base_tax * 0.5;
@@ -685,8 +685,8 @@ export function select_random_event(): any {
 
 /** 尝试将玩家移动到目标地点。 */
 export function move(state: any, target_location_id: string): [boolean, string, any] {
-    const current_loc = LOCATIONS[state.location];
-    const target_loc = LOCATIONS[target_location_id];
+    const current_loc = get_current_location(state);
+    const target_loc = get_location(state, target_location_id);
 
     if (!current_loc || !target_loc) {
         return [false, "目标地点不存在", null];
@@ -849,7 +849,7 @@ export function resolve_combat_simple(state: any, enemy_power: number, choice: s
             state.battle_lost_today = true;
         }
 
-        const loc_info = LOCATIONS[state.location] || {};
+        const loc_info = get_current_location(state) ?? {};
         const faction_id = loc_info.faction_id;
         if (faction_id && faction_id in state.faction_relations) {
             state.faction_relations[faction_id] -= 10;
@@ -924,7 +924,7 @@ export function resolve_combat_simple(state: any, enemy_power: number, choice: s
             state.battle_lost_today = true;
         }
 
-        const loc_info = LOCATIONS[state.location] || {};
+        const loc_info = get_current_location(state) ?? {};
         const faction_id = loc_info.faction_id;
         if (faction_id && faction_id in state.faction_relations) {
             state.faction_relations[faction_id] -= 10;
@@ -959,7 +959,7 @@ export function sell_prisoners(state: any, location_id: string, unit_id: string,
         return "卖出数量必须大于 0";
     }
 
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
     }
@@ -1024,7 +1024,7 @@ export function arena_fight(state: any, location_id: string, rounds: number): st
         return "竞技场轮数必须大于 0";
     }
 
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
     }
@@ -1082,9 +1082,12 @@ export function trade(state: any, location_id: string, action: string, goods_id:
         return "交易数量必须大于 0";
     }
 
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
+    }
+    if (!loc.market) {
+        return `地点 '${loc.name ?? location_id}' 没有市场`;
     }
 
     let trade_bonus = 0.0;
@@ -1165,12 +1168,15 @@ export function recruit(state: any, location_id: string, unit_id: string, quanti
         return "招募数量必须大于 0";
     }
 
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
     }
 
     const barracks = loc.barracks || [];
+    if (!barracks.length) {
+        return `地点 '${loc.name ?? location_id}' 没有兵营`;
+    }
     if (!barracks.includes(unit_id)) {
         const unit_name = UNITS[unit_id]?.name ?? unit_id;
         return `${loc.name ?? location_id} 的兵营不可招募 '${unit_name}'`;
@@ -1243,18 +1249,18 @@ export function assign_lord(state: any, companion_id: string, location_id: strin
     }
 
     if (!state.fiefs.includes(location_id)) {
-        const loc_name = LOCATIONS[location_id]?.name ?? location_id;
+        const loc_name = get_location(state, location_id)?.name ?? location_id;
         return `地点 '${loc_name}' 不是你的封地！`;
     }
 
     state.lords.push(companion_id);
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (loc) {
         loc.owner = "lord";
     }
 
     const comp_name = COMPANIONS[companion_id]?.name ?? companion_id;
-    const loc_name = LOCATIONS[location_id]?.name ?? location_id;
+    const loc_name = get_location(state, location_id)?.name ?? location_id;
     const msg = `成功分封同伴 [${comp_name}] 管理 [${loc_name}]！`;
     state.add_log(msg);
     return msg;
@@ -1362,7 +1368,7 @@ export function buy_gear(state: any, gear_id: string, quantity: number = 1): str
 
 /** 在可钓鱼地点进行钓鱼行动。 */
 export function fish(state: any, location_id: string): string {
-    const loc = LOCATIONS[location_id];
+    const loc = get_location(state, location_id);
     if (!loc) {
         return `地点 '${location_id}' 不存在`;
     }
@@ -1422,7 +1428,7 @@ export function sell_fish(state: any, item_id: string, quantity: number): string
         return "出售数量必须大于 0";
     }
 
-    const loc = LOCATIONS[state.location];
+    const loc = get_current_location(state);
     if (!loc || loc.market === null || loc.market === undefined) {
         const loc_name = loc ? loc.name : state.location;
         return `[${loc_name}] 没有市场，无法出售物品！`;
@@ -1889,7 +1895,7 @@ function _get_prisoner_unit_name(unit_id: string): string {
 }
 
 function _reduce_faction_relation(state: any, penalty: number): string {
-    const loc = LOCATIONS[state.location] || {};
+    const loc = get_current_location(state) ?? {};
     const faction_id = loc.faction_id;
     if (faction_id && faction_id in state.faction_relations) {
         state.faction_relations[faction_id] -= penalty;
@@ -1962,7 +1968,7 @@ export function execute_prisoners(state: any, unit_id: string, quantity: number)
         `（威慑 +${EXECUTE_INTIMIDATION_GAIN * quantity}，声望 +${EXECUTE_RENOWN_GAIN * quantity}），` +
         `但道德大损、${hit_faction} 对你怒不可遏（关系 -${EXECUTE_RELATION_PENALTY}）。`;
 
-    const loc_faction = LOCATIONS[state.location]?.faction_id;
+    const loc_faction = get_current_location(state)?.faction_id;
     if (loc_faction) {
         const lords = lords_of_faction(loc_faction);
         if (lords.length > 0) {
@@ -2142,8 +2148,8 @@ export function get_price_multiplier(state: any, location_id: string, goods_id: 
 // ===== Phase 17：经济真实感 —— 产业链加工与讨价还价 =====
 
 /** 判断某地点是否拥有指定加工设施。 */
-export function has_facility(location_id: string, facility: string): boolean {
-    const loc = LOCATIONS[location_id] || {};
+export function has_facility(location_id: string, facility: string, state?: any): boolean {
+    const loc = (state ? get_location(state, location_id) : LOCATIONS[location_id]) || {};
     const facilities = loc.facilities || [];
     return facilities.includes(facility);
 }
@@ -2160,9 +2166,9 @@ export function commission_crafting(state: any, recipe_id: string, location_id: 
     if (!recipe) {
         return `未知的加工配方 '${recipe_id}'`;
     }
-    const loc = LOCATIONS[loc_id] || {};
+    const loc = get_location(state, loc_id) ?? {};
     const fac_name = FACILITY_NAMES[recipe.facility] ?? "工坊";
-    if (!has_facility(loc_id, recipe.facility)) {
+    if (!has_facility(loc_id, recipe.facility, state)) {
         return `[${loc.name ?? loc_id}] 没有${fac_name}，无法进行 [${recipe.name}] 加工！`;
     }
     const in_goods = recipe.input_goods;
@@ -2190,7 +2196,7 @@ export function commission_crafting(state: any, recipe_id: string, location_id: 
 
 /** 讨价还价交易：魅力决定议价空间，掷骰决定成败，并叠加世界新闻行情。不改动原 trade()。 */
 export function haggle_trade(state: any, location_id: string, action: string, goods_id: string, quantity: number): any {
-    const loc = LOCATIONS[location_id] || {};
+    const loc = get_location(state, location_id) ?? {};
     const market = loc.market || {};
     const goods_name = GOODS[goods_id]?.name ?? goods_id;
     if (quantity <= 0) {
@@ -2286,7 +2292,26 @@ export function get_all_regions(): RegionConfig[] {
 }
 
 /** 初始化区域：根据 regionId 生成区域地图并存入 state。 */
-export function init_region(state: any, regionId: string): string {
+/** 区域出生点选择：优先有市场的地点。 */
+function pick_region_spawn(locs: Record<string, any>): any | null {
+    const list = Object.values(locs);
+    if (list.length === 0) return null;
+    return list.find(l => !!l.market) ?? list[0];
+}
+
+export function init_region(state: any, regionId: string, force: boolean = false): string {
+    // 幂等：同一区域已生成且未强制，复用已有数据
+    if (!force && state.selected_region === regionId && state.region_locations && Object.keys(state.region_locations).length > 0) {
+        if (state.region_locations[state.location]) {
+            return `已在区域内，地点正常`;
+        }
+        const spawn = pick_region_spawn(state.region_locations);
+        if (spawn) {
+            state.location = spawn.id;
+            return `已修复区域地点指针 → ${spawn.name}`;
+        }
+        return `区域地点数据异常`;
+    }
     const region = get_region(regionId);
     if (!region) {
         return `区域 '${regionId}' 不存在`;
@@ -2294,11 +2319,12 @@ export function init_region(state: any, regionId: string): string {
     const generated = generate_region_map(region);
     state.selected_region = regionId;
     state.region_locations = generated;
-    // 选第一个 town 或 port 作为起点
-    const ids = Object.keys(generated);
-    const startId = ids.find(id => (generated[id].type === "town" || generated[id].type === "port")) ?? ids[0];
-    state.location = startId;
-    state.add_log(`你来到了 ${region.name} 的 ${generated[startId].name}，开始了新的征途。`);
+    const spawn = pick_region_spawn(generated);
+    if (!spawn) {
+        return `区域生成失败：无可用地点`;
+    }
+    state.location = spawn.id;
+    state.add_log(`你来到了 ${region.name} 的 ${spawn.name}，开始了新的征途。`);
     return `已初始化区域: ${region.name}`;
 }
 
@@ -2309,10 +2335,18 @@ export function get_current_region(state: any): RegionConfig | null {
 }
 
 /** 获取当前所在地对象（自动区分区域模式/经典模式）。 */
+/** 统一地点解析：优先当前区域的生成地点，回退经典 LOCATIONS。经典模式行为不变。 */
+export function get_location(state: any, location_id: string | null | undefined): any | null {
+    if (!location_id) return null;
+    if (state.selected_region && state.region_locations) {
+        const region_loc = state.region_locations[location_id];
+        if (region_loc) return region_loc;
+    }
+    return LOCATIONS[location_id] ?? null;
+}
+
 export function get_current_location(state: any): any | null {
-    const region = state.selected_region ? get_current_region(state) : null;
-    const locs = state.selected_region ? state.region_locations : LOCATIONS;
-    return locs[state.location] ?? null;
+    return get_location(state, state.location);
 }
 
 /** 区域模式下的移动（镜像 move()，使用 region_locations 和 terrain 成本）。 */
@@ -2366,7 +2400,10 @@ export function get_mercenary_info(state: any): any | null {
     const lord = LORDS[contract.lord_id];
     const rankInfo = MERCENARY_RANKS[contract.rank];
     if (!lord || !rankInfo) return null;
-    const days_until_wage = Math.max(0, MERCENARY_CONTRACT_WAGE_INTERVAL - ((contract.days_served - contract.last_wage_day) % MERCENARY_CONTRACT_WAGE_INTERVAL));
+    const wageInterval = MERCENARY_CONTRACT_WAGE_INTERVAL;
+    const wageElapsed = contract.days_served - contract.last_wage_day;
+    const wageRem = wageInterval > 0 ? ((wageElapsed % wageInterval) + wageInterval) % wageInterval : 0;
+    const days_until_wage = wageInterval <= 0 ? 0 : (wageRem === 0 && wageElapsed > 0) ? 0 : wageInterval - wageRem;
     return {
         lord_name: lord.name,
         faction_name: FACTIONS[lord.faction_id]?.name ?? "未知",
@@ -2389,4 +2426,15 @@ export function get_knight_order_info(state: any): any | null {
         desc: order.desc,
         vows: order.vows,
     };
+}
+
+/** 原子退出区域：清 selected_region 同时把 location 落回有效经典地点，防反向悬空。 */
+export function exit_region(state: any, classic_location_id: string): string {
+    const target = LOCATIONS[classic_location_id];
+    if (!target) return `经典地点 '${classic_location_id}' 不存在`;
+    state.selected_region = null;
+    state.region_locations = null;
+    state.location = classic_location_id;
+    state.add_log(`你离开了区域，回到了 ${target.name}。`);
+    return `已返回大地图：${target.name}`;
 }

@@ -2,6 +2,8 @@ import type { GameState } from "../core/state";
 import { GOODS, UNITS, EQUIPMENT, FACILITY_NAMES } from "../core/data";
 import {
   get_current_location,
+  init_region,
+  exit_region,
   rest,
   trade,
   recruit,
@@ -30,16 +32,42 @@ const locTypeLabel: Record<string, string> = {
   pass: "关隘",
 };
 
+/**
+ * 双形态设施判断：兼容经典地点的布尔/数组字段（arena / tavern / slave_market）
+ * 与生成地点的 facilities(string[]) 数组。
+ * 规则：先查 location 上有没有同名布尔或数组字段，再查 facilities 数组。
+ */
+function town_has(loc: any, name: string): boolean {
+  const flag = loc?.[name];
+  if (typeof flag === "boolean") return flag;
+  if (Array.isArray(flag)) return flag.length > 0;
+  if (Array.isArray(loc?.facilities)) return loc.facilities.includes(name);
+  return false;
+}
+
 export function TownScene({ state, performAction, setView }: TownSceneProps) {
   const loc: any = get_current_location(state);
   if (!loc) {
+    // 地点悬空（常见于老存档缺 region_locations）：给自救选项，而不是静默踢回大地图
     return (
       <div className="panel">
         <div className="panel-title"><Castle size={22} /> 城镇</div>
-        <div className="text-muted text-sm">当前地点信息缺失。</div>
-        <button className="primary mt-12" onClick={() => setView("map")}>
-          返回地图
-        </button>
+        <div className="text-muted text-sm">
+          当前地点数据缺失（{state.location ?? "未知"}）。
+        </div>
+        <div className="flex-col gap-8 mt-12">
+          {state.selected_region && (
+            <button
+              className="secondary"
+              onClick={() => performAction(init_region, state.selected_region, true)}
+            >
+              重新生成当前区域
+            </button>
+          )}
+          <button className="primary" onClick={() => performAction(exit_region, "oak_village")}>
+            返回大地图
+          </button>
+        </div>
       </div>
     );
   }
@@ -47,10 +75,11 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
   const region = state.selected_region ? get_region(state.selected_region) : null;
   const goodsIds = Object.keys(loc.market ?? {});
   const barracksUnits = loc.barracks ?? [];
-  const hasTavern = Array.isArray(loc.tavern) && loc.tavern.length > 0;
-  const hasArena = !!loc.arena;
+  const hasTavern = town_has(loc, "tavern");
+  const hasArena = town_has(loc, "arena");
+  const hasSlaveMarket = town_has(loc, "slave_market");
   const facilities: string[] = loc.facilities ?? [];
-  const hasSmithy = facilities.includes("forge");
+  const hasSmithy = town_has(loc, "forge");
   const isPort = loc.type === "port";
 
   return (
@@ -115,7 +144,7 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
         </div>
       )}
 
-      {(hasTavern || hasArena || hasSmithy || isPort) && (
+      {(hasTavern || hasArena || hasSmithy || hasSlaveMarket || isPort) && (
         <div className="panel">
           <div className="panel-title"><Users size={22} /> 设施与人物</div>
           <div className="flex-col gap-12">
@@ -141,6 +170,12 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
               <div>
                 <div className="text-bold mb-8"><Wrench size={16} style={{ display: "inline", marginRight: "6px" }} />{FACILITY_NAMES["forge"] ?? "铁匠"} </div>
                 <button className="primary" onClick={() => performAction(visit_smithy, "upgrade")}>装备升级</button>
+              </div>
+            )}
+            {hasSlaveMarket && (
+              <div>
+                <div className="text-bold mb-8"><Users size={16} style={{ display: "inline", marginRight: "6px" }} />奴隶市场</div>
+                <div className="text-sm text-secondary">可买卖 / 处理战俘。</div>
               </div>
             )}
             {isPort && (
