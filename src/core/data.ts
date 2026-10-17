@@ -1,7 +1,7 @@
 /** 数据定义模块：包含装备、兵种、地图地点与随机事件配置。 */
 
 export const LORE = {
-    background: "旧帝国崩塌后的第 50 年，大陆分裂为三个互相征伐的王国。你是一名身无分文的流浪者，怀揣着成为‘终端暴君’的野心，踏上了这片充满战火与机遇的土地……"
+    background: "旧帝国崩塌后的第 50 年，大陆分裂为三个互相征伐的王国。你是一名身无分文的流浪者，怀揣着成为'终端暴君'的野心，踏上了这片充满战火与机遇的土地……"
 };
 
 export const PERSONALITY_TRAITS = ["hot_headed", "cautious", "greedy", "loyal", "cowardly"];
@@ -469,6 +469,18 @@ export const GOODS: Record<string, { name: string; base_price: number; processed
     iron: { name: "铁", base_price: 20 },
     wine: { name: "美酒", base_price: 70, processed: true },
     tool: { name: "铁器", base_price: 180, processed: true },
+    timber: { name: "木材", base_price: 8 },
+    stone: { name: "石料", base_price: 12 },
+    hides: { name: "兽皮", base_price: 15 },
+    salt: { name: "盐", base_price: 25 },
+    silk: { name: "丝绸", base_price: 120, processed: true },
+    fish_goods: { name: "鱼干", base_price: 6 },
+    cotton: { name: "棉花", base_price: 18 },
+    gold_dust: { name: "金砂", base_price: 200 },
+    frankincense: { name: "乳香", base_price: 90 },
+    olive_oil: { name: "橄榄油", base_price: 35 },
+    honey: { name: "蜂蜜", base_price: 22 },
+    horses: { name: "马匹", base_price: 150 },
 };
 
 // ===== Phase 17：经济真实感 —— 产业链与讨价还价配置 =====
@@ -493,9 +505,19 @@ export const RECIPES: Record<string, any> = {
         output_goods: "tool",
         output_amount: 1,
     },
+    weave_silk: {
+        id: "weave_silk",
+        name: "织造丝绸",
+        facility: "loom",
+        input_goods: "cotton",
+        input_amount: 3,
+        fee: 30,
+        output_goods: "silk",
+        output_amount: 1,
+    },
 };
 
-export const FACILITY_NAMES: Record<string, string> = { winery: "酿酒坊", forge: "铁匠工坊" };
+export const FACILITY_NAMES: Record<string, string> = { winery: "酿酒坊", forge: "铁匠工坊", sawmill: "锯木场", quarry: "采石场", loom: "织造坊" };
 export const HAGGLE_CHARM_FACTOR = 0.03;
 export const HAGGLE_BIG_SUCCESS_RATE = 0.35;
 export const HAGGLE_FAIL_RATE = 0.15;
@@ -516,5 +538,61 @@ export const POLICIES: Record<string, { id: string; name: string; effect: string
         id: "conscription",
         name: "强制征兵",
         effect: "max_army_size +20, renown -2/day",
+    },
+};
+
+export const MERCENARY_RANKS: Record<string, { id: string; name: string; wage: number; renown_req: number; perk: string }> = {
+    recruit: { id: "recruit", name: "新兵", wage: 10, renown_req: 0, perk: "无" },
+    veteran: { id: "veteran", name: "老兵", wage: 25, renown_req: 50, perk: "战力+5" },
+    captain: { id: "captain", name: "队长", wage: 50, renown_req: 150, perk: "带兵上限+10" },
+    commander: { id: "commander", name: "统领", wage: 100, renown_req: 300, perk: "战力+10, 带兵上限+20" },
+};
+
+export const MERCENARY_CONTRACT_WAGE_INTERVAL = 7;
+
+export const KNIGHT_ORDERS: Record<string, {
+    id: string;
+    name: string;
+    desc: string;
+    faction_id: string;
+    vows: { id: string; desc: string; rule: string }[];
+    reward: { renown: number; personal_power: number; gold: number };
+    penalty: string;
+}> = {
+    order_dawn: {
+        id: "order_dawn",
+        name: "黎明骑士团",
+        desc: "崇尚光明与荣誉的骑士团，成员禁止使用弓箭手，以正面交锋为荣。",
+        faction_id: "f1",
+        vows: [
+            { id: "no_archer", desc: "禁止使用弓箭手", rule: "no_archer" },
+            { id: "no_night_ambush", desc: "禁止夜战偷袭", rule: "no_night_ambush" },
+        ],
+        reward: { renown: 50, personal_power: 5, gold: 200 },
+        penalty: "违反誓言将被驱逐出骑士团，声望 -30",
+    },
+    order_iron: {
+        id: "order_iron",
+        name: "铁血骑士团",
+        desc: "崇尚武力的骑士团，成员禁止撤退，以死战到底为荣。",
+        faction_id: "f2",
+        vows: [
+            { id: "no_retreat", desc: "禁止撤退", rule: "no_retreat" },
+            { id: "no_beggar", desc: "禁止施舍乞丐", rule: "no_beggar" },
+        ],
+        reward: { renown: 60, personal_power: 8, gold: 150 },
+        penalty: "违反誓言将被驱逐出骑士团，声望 -30",
+    },
+    order_rose: {
+        id: "order_rose",
+        name: "蔷薇骑士团",
+        desc: "崇尚仁义的骑士团，成员禁止处决俘虏，以宽恕为荣。",
+        faction_id: "f3",
+        vows: [
+            { id: "no_execute", desc: "禁止处决俘虏", rule: "no_execute" },
+            { id: "no_gamble", desc: "禁止赌博", rule: "no_gamble" },
+        ],
+        reward: { renown: 40, personal_power: 3, gold: 250 },
+        penalty: "违反誓言将被驱逐出骑士团，声望 -30",
     },
 };
