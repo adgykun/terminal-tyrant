@@ -1,4 +1,5 @@
-import * as fs from "fs";
+
+
 
 export interface GameStateData {
     day?: number;
@@ -40,6 +41,16 @@ export interface GameStateData {
     intimidation?: number;
     world_news?: any[];
     lord_grudges?: string[];
+    mercenary_contract?: { lord_id: string; rank: string; days_served: number; last_wage_day: number } | null;
+    knight_order?: string | null;
+    knight_vow_broken?: boolean;
+    selected_region?: string | null;
+    region_locations?: Record<string, any>;
+    currencies?: { holdings: Record<string, number>; rates: Record<string, number> };
+    futures_contracts?: any[];
+    government_bonds?: any[];
+    available_futures?: any[];
+    available_bonds?: any[];
 }
 
 /** 管理游戏世界的持久化状态数据结构。 */
@@ -83,6 +94,16 @@ export class GameState {
     intimidation: number;
     world_news: any[];
     lord_grudges: string[];
+    mercenary_contract: { lord_id: string; rank: string; days_served: number; last_wage_day: number } | null;
+    knight_order: string | null;
+    knight_vow_broken: boolean;
+    selected_region: string | null;
+    region_locations: Record<string, any>;
+    currencies: { holdings: Record<string, number>; rates: Record<string, number> };
+    futures_contracts: any[];
+    government_bonds: any[];
+    available_futures: any[];
+    available_bonds: any[];
 
     constructor(data: GameStateData = {}) {
         this.day = data.day ?? 1;
@@ -136,6 +157,16 @@ export class GameState {
         this.intimidation = Math.max(0, data.intimidation ?? 0);
         this.world_news = data.world_news ? [...data.world_news] : [];
         this.lord_grudges = data.lord_grudges ? [...data.lord_grudges] : [];
+        this.mercenary_contract = data.mercenary_contract ?? null;
+        this.knight_order = data.knight_order ?? null;
+        this.knight_vow_broken = data.knight_vow_broken ?? false;
+        this.selected_region = data.selected_region ?? null;
+        this.region_locations = data.region_locations ? JSON.parse(JSON.stringify(data.region_locations)) : {};
+        this.currencies = data.currencies ? { holdings: { ...data.currencies.holdings }, rates: { ...data.currencies.rates } } : { holdings: {}, rates: {} };
+        this.futures_contracts = data.futures_contracts ? [...data.futures_contracts] : [];
+        this.government_bonds = data.government_bonds ? [...data.government_bonds] : [];
+        this.available_futures = data.available_futures ? [...data.available_futures] : [];
+        this.available_bonds = data.available_bonds ? [...data.available_bonds] : [];
     }
 
     /** 金钱属性别名，指向 gold。 */
@@ -204,6 +235,16 @@ export class GameState {
             intimidation: this.intimidation,
             world_news: this.world_news.map(e => ({ ...e })),
             lord_grudges: [...this.lord_grudges],
+            mercenary_contract: this.mercenary_contract ? { ...this.mercenary_contract } : null,
+            knight_order: this.knight_order,
+            knight_vow_broken: this.knight_vow_broken,
+            selected_region: this.selected_region,
+            region_locations: JSON.parse(JSON.stringify(this.region_locations)),
+            currencies: { holdings: { ...this.currencies.holdings }, rates: { ...this.currencies.rates } },
+            futures_contracts: this.futures_contracts.map(f => ({ ...f })),
+            government_bonds: this.government_bonds.map(b => ({ ...b })),
+            available_futures: this.available_futures.map(f => ({ ...f })),
+            available_bonds: this.available_bonds.map(b => ({ ...b })),
         };
     }
 
@@ -249,17 +290,39 @@ export class GameState {
             intimidation: data.intimidation ?? 0,
             world_news: data.world_news ?? [],
             lord_grudges: data.lord_grudges ?? [],
+            mercenary_contract: data.mercenary_contract ?? null,
+            knight_order: data.knight_order ?? null,
+            knight_vow_broken: data.knight_vow_broken ?? false,
+            selected_region: data.selected_region ?? null,
+            region_locations: data.region_locations ?? {},
+            currencies: data.currencies ?? { holdings: {}, rates: {} },
+            futures_contracts: data.futures_contracts ?? [],
+            government_bonds: data.government_bonds ?? [],
+            available_futures: data.available_futures ?? [],
+            available_bonds: data.available_bonds ?? [],
         });
     }
 
-    /** 将当前状态保存为 JSON 文件。 */
-    save(filepath: string): void {
-        fs.writeFileSync(filepath, JSON.stringify(this.to_dict(), null, 2), "utf-8");
+    /** 将当前状态保存到浏览器本地存储。 */
+    save(key: string = "terminal_tyrant_save"): void {
+        localStorage.setItem(key, JSON.stringify(this.to_dict()));
     }
 
-    /** 从 JSON 文件加载并恢复 GameState 实例。 */
-    static load(filepath: string): GameState {
-        const data = JSON.parse(fs.readFileSync(filepath, "utf-8"));
+    /** 从浏览器本地存储加载并恢复 GameState 实例。 */
+    static load(key: string = "terminal_tyrant_save"): GameState | null {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
         return GameState.from_dict(data);
+    }
+
+    /** 检查是否存在存档。 */
+    static has_save(key: string = "terminal_tyrant_save"): boolean {
+        return localStorage.getItem(key) !== null;
+    }
+
+    /** 删除存档。 */
+    static delete_save(key: string = "terminal_tyrant_save"): void {
+        localStorage.removeItem(key);
     }
 }
