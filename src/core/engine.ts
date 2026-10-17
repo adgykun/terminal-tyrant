@@ -56,7 +56,13 @@ import {
     HAGGLE_BIG_SUCCESS_RATE,
     HAGGLE_FAIL_RATE,
     HAGGLE_MAX_DISCOUNT,
+    MERCENARY_RANKS,
+    KNIGHT_ORDERS,
+    MERCENARY_CONTRACT_WAGE_INTERVAL,
 } from "./data.js";
+
+import { WORLD_REGIONS, get_region, RegionConfig } from "./world_regions.js";
+import { generate_region_map } from "./map_generator.js";
 import {
     APPEARANCE_REVEAL_TEXTS,
     ADMIRER_EVENT_TEXTS,
@@ -2270,4 +2276,117 @@ export function haggle_trade(state: any, location_id: string, action: string, go
         state.add_log(msg);
         return { success: true, result, discount, dialogue, message: msg };
     }
+}
+
+// ==================== 区域辅助函数 ====================
+
+/** 返回所有可游玩区域配置。 */
+export function get_all_regions(): RegionConfig[] {
+    return WORLD_REGIONS;
+}
+
+/** 初始化区域：根据 regionId 生成区域地图并存入 state。 */
+export function init_region(state: any, regionId: string): string {
+    const region = get_region(regionId);
+    if (!region) {
+        return `区域 '${regionId}' 不存在`;
+    }
+    const generated = generate_region_map(region);
+    state.selected_region = regionId;
+    state.region_locations = generated;
+    // 选第一个 town 或 port 作为起点
+    const ids = Object.keys(generated);
+    const startId = ids.find(id => (generated[id].type === "town" || generated[id].type === "port")) ?? ids[0];
+    state.location = startId;
+    state.add_log(`你来到了 ${region.name} 的 ${generated[startId].name}，开始了新的征途。`);
+    return `已初始化区域: ${region.name}`;
+}
+
+/** 获取当前选中的区域配置。 */
+export function get_current_region(state: any): RegionConfig | null {
+    if (!state.selected_region) return null;
+    return get_region(state.selected_region) ?? null;
+}
+
+/** 获取当前所在地对象（自动区分区域模式/经典模式）。 */
+export function get_current_location(state: any): any | null {
+    const region = state.selected_region ? get_current_region(state) : null;
+    const locs = state.selected_region ? state.region_locations : LOCATIONS;
+    return locs[state.location] ?? null;
+}
+
+/** 区域模式下的移动（镜像 move()，使用 region_locations 和 terrain 成本）。 */
+export function move_region(state: any, targetId: string): [boolean, string, any] {
+    if (!state.selected_region) {
+        return [false, "未选择区域，无法进行区域移动", null];
+    }
+    const locs = state.region_locations;
+    const current = locs[state.location];
+    const target = locs[targetId];
+    if (!current || !target) {
+        return [false, "目标地点不存在", null];
+    }
+    if (!current.neighbors?.includes(targetId)) {
+        return [false, `无法从 ${current.name} 前往 ${target.name}`, null];
+    }
+    // 使用地形移动成本
+    advance_day(state);
+    state.location = targetId;
+    state.morale = Math.max(0, state.morale - 5);
+    // 检查地形事件
+    const event = select_random_event();
+    const event_data = { ...event };
+    const evt = event.type;
+    if (evt === "caravan" || evt === "treasure") {
+        const gold = event.gold_reward ?? 30;
+        state.gold += gold;
+        event_data.enemy_power = 0;
+        event_data.type = evt;
+        event_data.description = `移动至 ${target.name}：${event.description} 获得 ${gold} 金币。`;
+    } else if (evt === "combat") {
+        const min_pow = event.enemy_power_min ?? 5;
+        const max_pow = event.enemy_power_max ?? 20;
+        event_data.enemy_power = randomInt(min_pow, max_pow);
+        event_data.type = evt;
+        event_data.description = `移动至 ${target.name}：${event.description} 敌方战力：${event_data.enemy_power}。`;
+    } else {
+        event_data.type = "nothing";
+        event_data.description = event.description;
+    }
+    state.add_log(`移动至 ${target.name}。`);
+    return [true, `到达 ${target.name}`, event_data];
+}
+
+// ==================== 佣兵/骑士团信息查询 ====================
+
+/** 获取当前佣兵契约的显示信息（若未签约返回 null）。 */
+export function get_mercenary_info(state: any): any | null {
+    const contract = state.mercenary_contract;
+    if (!contract) return null;
+    const lord = LORDS[contract.lord_id];
+    const rankInfo = MERCENARY_RANKS[contract.rank];
+    if (!lord || !rankInfo) return null;
+    const days_until_wage = Math.max(0, MERCENARY_CONTRACT_WAGE_INTERVAL - ((contract.days_served - contract.last_wage_day) % MERCENARY_CONTRACT_WAGE_INTERVAL));
+    return {
+        lord_name: lord.name,
+        faction_name: FACTIONS[lord.faction_id]?.name ?? "未知",
+        rank_name: rankInfo.name,
+        wage: rankInfo.wage,
+        days_served: contract.days_served,
+        days_until_wage,
+        perk: rankInfo.perk,
+    };
+}
+
+/** 获取当前骑士团信息的显示摘要（若未入团返回 null）。 */
+export function get_knight_order_info(state: any): any | null {
+    const orderId = state.knight_order;
+    if (!orderId) return null;
+    const order = KNIGHT_ORDERS[orderId];
+    if (!order) return null;
+    return {
+        order_name: order.name,
+        desc: order.desc,
+        vows: order.vows,
+    };
 }
