@@ -2522,3 +2522,110 @@ export function spin_slots(state: any, bet: number): SlotSpinResult {
     state.add_log?.(message);
     return { success: true, message, symbols, payout, net, result };
 }
+
+/* ===== 大地图自由移动（Canvas 混合架构支持函数）===== */
+/** 区域/经典统一的地点列表来源：地图组件永远只通过它拿地点，不感知模式。 */
+export function get_map_locations(state: any): any[] {
+    if (state.selected_region && state.region_locations) {
+        return Object.values(state.region_locations);
+    }
+    return Object.values(LOCATIONS);
+}
+
+/** 内容包围盒 + padding，用于相机 fit-to-view（不要硬编码 0~100）。 */
+export function compute_content_bounds(locations: any[], pad = 6) {
+    if (!locations.length) return { minX: 0, minY: 0, maxX: 100, maxY: 100 };
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const l of locations) {
+        if (typeof l.x === "number") { if (l.x < minX) minX = l.x; if (l.x > maxX) maxX = l.x; }
+        if (typeof l.y === "number") { if (l.y < minY) minY = l.y; if (l.y > maxY) maxY = l.y; }
+    }
+    if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 100; maxY = 100; }
+    return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+}
+
+/** 距 (x,y) 最近的地点 id（radius 为世界单位，省略=全局最近）。 */
+export function nearest_location_id(locations: any[], x: number, y: number, radius?: number): string | null {
+    let best: string | null = null;
+    let bestD = radius !== undefined ? radius : Infinity;
+    for (const l of locations) {
+        if (typeof l.x !== "number" || typeof l.y !== "number") continue;
+        const d = Math.hypot(l.x - x, l.y - y);
+        if (d <= bestD) { bestD = d; best = l.id; }
+    }
+    return best;
+}
+
+/** 在 neighbors 图上做 BFS（无向等权），返回 [起点..终点] 地点 id 序列；不可达返回 null。 */
+export function plan_travel_path(state: any, fromId: string, toId: string): string[] | null {
+    const from = get_location(state, fromId);
+    const to = get_location(state, toId);
+    if (!from || !to) return null;
+    if (fromId === toId) return [fromId];
+    const adj: Record<string, string[]> = {};
+    for (const l of get_map_locations(state) as any[]) {
+        (l.neighbors || []).forEach((n: string) => { (adj[l.id] = adj[l.id] || []).push(n); });
+    }
+    const prev: Record<string, string | null> = {};
+    prev[fromId] = null;
+    const queue: string[] = [fromId];
+    let found = false;
+    for (let h = 0; h < queue.length; h++) {
+        const cur = queue[h];
+        if (cur === toId) { found = true; break; }
+        for (const n of adj[cur] || []) {
+            if (prev[n] === undefined) { prev[n] = cur; queue.push(n); }
+        }
+    }
+    if (!found) return null;
+    const path: string[] = [];
+    let c: string | null = toId;
+    while (c) { path.unshift(c); c = prev[c]; }
+    if (path[0] !== fromId) return null;
+    return path;
+}
+
+/** 行程预计天数 = 途经段数（每段结算一次现有 move/move_region）。 */
+export function travel_eta_days(path: string[] | null): number {
+    if (!path || path.length < 2) return 0;
+    return path.length - 1;
+}
+
+/* ===== 大地图真自由位移（B 方案：按距离累计天数）===== */
+export const FREE_MOVE_DAY_DISTANCE = 10;
+export const FREE_MOVE_SPEED = 12;
+
+export interface FreeMoveResult {
+  events: any[];
+  daysPassed: number;
+}
+
+export function advance_free_move(state: any, distance: number, onRoad = false): FreeMoveResult {
+    const events: any[] = [];
+    let daysPassed = 0;
+    if (typeof distance !== "number" || distance <= 0 || !isFinite(distance)) return { events, daysPassed: 0 };
+    state.travel_accum = (typeof state.travel_accum === "number" ? state.travel_accum : 0) + distance;
+    while (state.travel_accum >= FREE_MOVE_DAY_DISTANCE) {
+        state.travel_accum -= FREE_MOVE_DAY_DISTANCE;
+        advance_day(state);
+        daysPassed += 1;
+        state.morale = Math.max(0, state.morale - 5);
+        if (onRoad && Math.random() < 0.5) continue;
+        const ev = select_random_event();
+        const etype = ev.type;
+        if (etype === "caravan" || etype === "treasure") {
+            const gold = ev.gold_reward ?? (etype === "caravan" ? 30 : 50);
+            state.gold += gold;
+            events.push({ type: etype, description: ev.description, gold });
+            state.add_log(`自由行军途中（${etype === "caravan" ? "商队" : "宝藏"}）：${ev.description} 获得 ${gold} 金币。`);
+        } else if (etype === "combat") {
+            const enemy_power = randomInt(ev.enemy_power_min ?? 5, ev.enemy_power_max ?? 20);
+            events.push({ type: "combat", description: ev.description, enemy_power });
+            state.add_log(`自由行军途中遭遇敌袭：${ev.description} 敌方战力 ${enemy_power}。`);
+        } else {
+            events.push({ type: etype, description: ev.description });
+            state.add_log(`自由行军途中：${ev.description}`);
+        }
+    }
+    return { events, daysPassed };
+}

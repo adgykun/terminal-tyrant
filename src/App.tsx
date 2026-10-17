@@ -3,7 +3,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Sidebar } from "./components/Sidebar";
 import { LogPanel } from "./components/LogPanel";
 import { StartMenu } from "./components/StartMenu";
-import { WorldMap } from "./components/WorldMap";
+import { WorldMapCanvas } from "./components/WorldMapCanvas";
 import { TownScene } from "./components/TownScene";
 import { CharacterPanel } from "./components/CharacterPanel";
 import { PartyPanel } from "./components/PartyPanel";
@@ -11,7 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { QuestPanel } from "./components/QuestPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
-import { move, resolve_combat_simple, move_region } from "./core/engine";
+import { move, resolve_combat_simple, move_region, advance_free_move } from "./core/engine";
 
 export default function App() {
   const game = useGame();
@@ -26,7 +26,7 @@ export default function App() {
     switch (game.view) {
       case "map":
         return (
-          <WorldMap
+          <WorldMapCanvas
             state={gs}
             onMove={(targetId: string) => {
               const isRegionMode = gs.selected_region && gs.region_locations;
@@ -59,6 +59,23 @@ export default function App() {
               }, targetId);
               return result;
             }}
+            onFreeMove={(dist, onRoad) => {
+              game.performAction((s: any) => {
+                const { events, daysPassed } = advance_free_move(s, dist, onRoad);
+                for (const ev of events) {
+                  if (ev.type === "combat") {
+                    game.setCombat({ enemyPower: ev.enemy_power ?? 10, result: null, description: ev.description ?? "" });
+                  } else if (ev.type === "caravan" || ev.type === "treasure") {
+                    game.setEventPopup({
+                      title: ev.type === "caravan" ? "遭遇商队" : "发现宝藏",
+                      description: ev.description ?? "",
+                      type: ev.type,
+                    });
+                  }
+                }
+                return { ok: true, daysPassed };
+              });
+            }}
             onEnterTown={() => game.setView("town")}
           />
         );
@@ -75,7 +92,7 @@ export default function App() {
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
       default:
-        return <WorldMap state={gs} onMove={() => {}} />;
+        return <WorldMapCanvas state={gs} onMove={() => {}} />;
     }
   };
 

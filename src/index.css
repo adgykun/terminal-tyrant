@@ -925,3 +925,226 @@ select:focus {
 .slot-pay b { color: var(--accent-gold-light, #e8c878); font-weight: 700; }
 @keyframes slot-spin { from { transform: translateY(0); } to { transform: translateY(calc(var(--slot-cell) * -5)); } }
 @keyframes slot-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.25); filter: drop-shadow(0 0 6px var(--accent-gold)); } }
+
+/* ================= 大地图 Canvas (WorldMapCanvas) ================= */
+.wmc-container {
+  position: relative;
+  width: 100%;
+  height: 60vh;
+  min-height: 380px;
+  max-height: 640px;
+  overflow: hidden;
+  border-radius: var(--radius, 10px);
+  border: 1px solid var(--border-color, #333);
+  background: #12100b;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.wmc-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.wmc-canvas:active { cursor: grabbing; }
+
+/* 地点信息卡（羊皮纸风） */
+.wmc-info-card {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: 240px;
+  padding: 10px 14px;
+  background: linear-gradient(145deg, #1e1a12 0%, #16120b 100%);
+  border: 1px solid rgba(212, 168, 67, 0.4);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 5;
+}
+.wmc-info-title { font-weight: 700; color: var(--accent-gold, #d4a843); font-size: 14px; margin-bottom: 4px; }
+.wmc-info-body { font-size: 12px; color: var(--text-secondary, #bbb); line-height: 1.5; }
+
+/* 行程状态条 */
+.wmc-travel-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(20, 18, 12, 0.92);
+  border: 1px solid rgba(212, 168, 67, 0.5);
+  border-radius: 8px;
+  color: var(--accent-gold, #d4a843);
+  font-size: 13px;
+  z-index: 5;
+}
+.wmc-btn-sm {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: rgba(212, 168, 67, 0.15);
+  border: 1px solid var(--accent-gold, #d4a843);
+  border-radius: 4px;
+  color: var(--accent-gold, #d4a843);
+  cursor: pointer;
+  min-height: auto;
+  min-width: auto;
+}
+.wmc-btn-sm:hover { background: rgba(212, 168, 67, 0.3); }
+
+/* 接近地点操作条 */
+.wmc-action-bar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(20, 18, 12, 0.94);
+  border: 1px solid rgba(212, 168, 67, 0.4);
+  border-radius: 10px;
+  z-index: 5;
+}
+.wmc-action-label { font-size: 13px; color: var(--accent-gold, #d4a843); font-weight: 700; margin-right: 4px; }
+.wmc-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--accent-gold-dark, #7a5f2f);
+  color: #fff;
+  border: 1px solid var(--accent-gold, #d4a843);
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: auto;
+  min-width: auto;
+  touch-action: manipulation;
+}
+.wmc-btn:hover { filter: brightness(1.15); }
+.wmc-btn-danger { background: #6b2020; border-color: #c0392b; }
+.wmc-btn-ghost { background: rgba(255,255,255,0.05); border-color: var(--border-color, #444); color: var(--text-secondary, #bbb); }
+
+/* 缩放控件 */
+.wmc-zoom-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 6;
+}
+.wmc-zoom-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 18, 12, 0.92);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  color: var(--accent-gold, #d4a843);
+  font-size: 15px;
+  cursor: pointer;
+  min-height: auto;
+  min-width: auto;
+}
+.wmc-zoom-btn:hover { background: rgba(212, 168, 67, 0.2); }
+
+/* 图例 */
+.wmc-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  z-index: 5;
+  max-width: 50%;
+}
+.wmc-legend-item {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  background: rgba(20, 18, 12, 0.75);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+}
+
+/* 区域名徽章 */
+.wmc-region-badge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent-gold, #d4a843);
+  background: rgba(20, 18, 12, 0.85);
+  border: 1px solid rgba(212, 168, 67, 0.4);
+  border-radius: 20px;
+  z-index: 5;
+}
+
+/* 移动端地图微调 */
+@media (max-width: 768px) {
+  .wmc-container { height: 52vh; min-height: 320px; }
+  .wmc-action-bar { bottom: var(--sab, 12px); padding: 8px 12px; }
+  .wmc-legend { display: none; }
+}
+
+/* 自由位移 / 官道 模式切换 */
+.wmc-mode-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 4px;
+  z-index: 6;
+  background: rgba(20,18,12,0.85);
+  border: 1px solid rgba(212,168,67,0.3);
+  border-radius: 8px;
+  padding: 4px;
+}
+.wmc-mode-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: auto;
+  min-width: auto;
+}
+.wmc-mode-btn:hover { color: var(--accent-gold, #d4a843); }
+.wmc-mode-active { color: #1a1410 !important; background: var(--accent-gold, #d4a843); }
+
+/* 跨天飘字 */
+.wmc-day-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--accent-gold, #d4a843);
+  text-shadow: 0 0 8px rgba(0,0,0,0.8), 0 0 16px rgba(212,168,67,0.4);
+  pointer-events: none;
+  z-index: 7;
+  animation: wmc-day-toast-pop 0.8s ease-out forwards;
+}
+@keyframes wmc-day-toast-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  30% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -60%) scale(1); }
+}

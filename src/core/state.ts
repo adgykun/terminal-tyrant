@@ -31,6 +31,7 @@ export interface GameStateData {
     fish_inventory?: Record<string, number>;
     battle_lost_today?: boolean;
     npc_states?: Record<string, { mood: string; last_interaction: string }>;
+    travel_accum?: number;
     attributes?: Record<string, number>;
     appearance?: number;
     appearance_revealed?: boolean;
@@ -104,6 +105,7 @@ export class GameState {
     government_bonds: any[];
     available_futures: any[];
     available_bonds: any[];
+    travel_accum: number;
 
     constructor(data: GameStateData = {}) {
         this.day = data.day ?? 1;
@@ -167,6 +169,7 @@ export class GameState {
         this.government_bonds = data.government_bonds ? [...data.government_bonds] : [];
         this.available_futures = data.available_futures ? [...data.available_futures] : [];
         this.available_bonds = data.available_bonds ? [...data.available_bonds] : [];
+        this.travel_accum = data.travel_accum ?? 0;
     }
 
     /** 金钱属性别名，指向 gold。 */
@@ -245,6 +248,7 @@ export class GameState {
             government_bonds: this.government_bonds.map(b => ({ ...b })),
             available_futures: this.available_futures.map(f => ({ ...f })),
             available_bonds: this.available_bonds.map(b => ({ ...b })),
+            travel_accum: this.travel_accum,
         };
     }
 
@@ -300,6 +304,7 @@ export class GameState {
             government_bonds: data.government_bonds ?? [],
             available_futures: data.available_futures ?? [],
             available_bonds: data.available_bonds ?? [],
+            travel_accum: data.travel_accum ?? 0,
         });
     }
 
