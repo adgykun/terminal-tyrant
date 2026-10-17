@@ -77,6 +77,24 @@ export default function App() {
               });
             }}
             onEnterTown={() => game.setView("town")}
+            onUnitCombat={(ep, desc) => {
+              game.setCombat({ enemyPower: ep, result: null, description: desc });
+            }}
+            onUnitInteract={(u) => {
+              const txt = u.type === "caravan" ? "商队表示可以与你交易货物（尚未实现跑商）。" : "旅人向你打听附近的情报（尚未实现 NPC 对话）。";
+              game.setEventPopup({ title: u.type === "caravan" ? "遇到商队" : "遇到旅人", description: txt, type: "info" });
+            }}
+            onPassBattle={(garrison) => {
+              game.setCombat({ enemyPower: garrison, result: null, description: "攻克关隘" });
+            }}
+            onCamp={() => {
+              game.performAction((s: any) => {
+                s.morale = Math.min(100, (s.morale ?? 0) + 20);
+                s.food = Math.max(0, (s.food ?? 0) - 5);
+                s.add_log?.("你在野外扎营休整，士气 +20，粮食 -5。");
+                return { ok: true };
+              });
+            }}
           />
         );
       case "town":
