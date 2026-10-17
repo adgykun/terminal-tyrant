@@ -1,7 +1,7 @@
 /** 对话引擎模块：根据 NPC 的性格、记忆、心情与玩家声望动态选择并生成台词。 */
 
-import { ATTITUDE_LEVELS, NPC_MERCHANTS } from "./data.js";
-import { DIALOGUE_DATABASE } from "./dialogues.js";
+import { ATTITUDE_LEVELS, NPC_MERCHANTS } from "./data";
+import { DIALOGUE_DATABASE } from "./dialogues";
 
 export const LEAVE_PARTY = "LEAVE_PARTY";
 
