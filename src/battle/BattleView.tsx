@@ -2,7 +2,7 @@
  * BattleView —— 3D 军团战视图（React 壳 + 原生 Three.js + ECS）。
  *
  * 只做挂载/卸载；World、System、实体都在此初始化与释放。
- * MovementSystem 驱动移动，CombatSystem 驱动接触交战，RenderSystem 驱动渲染。
+ * TargetingSystem 寻敌走位 → MovementSystem 位移 → CombatSystem 交战 → RenderSystem 渲染。
  */
 import { useEffect, useRef, useState } from "react";
 import { World } from "../ecs/World";
@@ -11,7 +11,9 @@ import { Velocity } from "./Velocity";
 import { Team } from "./Team";
 import { Health } from "./Health";
 import { Attack } from "./Attack";
+import { Target } from "./Target";
 import { MovementSystem } from "./MovementSystem";
+import { TargetingSystem } from "./TargetingSystem";
 import { CombatSystem } from "./CombatSystem";
 import { RenderSystem } from "./RenderSystem";
 
@@ -31,27 +33,30 @@ export function BattleView({ playerCount = 24, enemyCount = 24 }: BattleViewProp
     const mount = mountRef.current;
     if (!mount) return;
 
-    // 1. 创建 World + Systems
+    // 1. 创建 World + Systems（顺序：targeting → movement → combat → render）
     const world = new World();
     worldRef.current = world;
+    const targetingSys = new TargetingSystem();
     const moveSys = new MovementSystem();
     const combatSys = new CombatSystem();
     const renderSys = new RenderSystem(mount);
+    world.addSystem(targetingSys);
     world.addSystem(moveSys);
     world.addSystem(combatSys);
     world.addSystem(renderSys);
 
-    // 2. 生成演示战场：两军对垒
+    // 2. 生成演示战场：两军对垒（初始速度 0，由寻敌驱动）
     const spawnRow = (side: number, color: number, x0: number, count: number) => {
       for (let i = 0; i < count; i++) {
         const col = i % 6;
         const row = Math.floor(i / 6);
         const e = world.createEntity();
         e.addComponent(new Position(x0 + col * 1.6 - 4, 0.55, row * 1.6 - 4))
-          .addComponent(new Velocity(side === 0 ? 3.2 : -3.2, 0, 0))
+          .addComponent(new Velocity(0, 0, 0))
           .addComponent(new Team(side, color))
           .addComponent(new Health(100))
-          .addComponent(new Attack(10, 1.2, 0.8));
+          .addComponent(new Attack(10, 1.2, 0.8))
+          .addComponent(new Target(null));
       }
     };
     spawnRow(0, 0x4a90ff, 8, playerCount);
@@ -66,6 +71,7 @@ export function BattleView({ playerCount = 24, enemyCount = 24 }: BattleViewProp
       world.removeSystem(renderSys);
       world.removeSystem(combatSys);
       world.removeSystem(moveSys);
+      world.removeSystem(targetingSys);
       worldRef.current = null;
     };
   }, [playerCount, enemyCount]);
