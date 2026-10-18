@@ -1,3 +1,4 @@
+import { BANNERLORD_TROOPS } from "./troops_bannerlord";
 /** 数据定义模块：包含装备、兵种、地图地点与随机事件配置。 */
 
 export const LORE = {
@@ -125,24 +126,67 @@ export const NEWS_TEMPLATES = [
 ];
 
 export const FACTIONS: Record<string, { id: string; name: string; color: string; relations: Record<string, number> }> = {
-    f1: {
-        id: "f1",
-        name: "斯瓦迪亚",
-        color: "blue",
-        relations: { f2: 0, f3: 0 },
+    // 骑砍2 卡拉迪亚八王国
+    empire_n: {
+        id: "empire_n",
+        name: "北帝国",
+        color: "purple",
+        relations: { empire_w: -50, empire_s: 10, sturgia: -50, vlandia: 20, khuzait: 0, aserai: 10, battania: 20 },
     },
-    f2: {
-        id: "f2",
-        name: "罗多克",
-        color: "green",
-        relations: { f1: 0, f3: 0 },
+    empire_w: {
+        id: "empire_w",
+        name: "西帝国",
+        color: "indigo",
+        relations: { empire_n: -50, empire_s: -50, sturgia: 20, vlandia: -50, khuzait: 0, aserai: 20, battania: 0 },
     },
-    f3: {
-        id: "f3",
-        name: "维吉亚",
+    empire_s: {
+        id: "empire_s",
+        name: "南帝国",
+        color: "violet",
+        relations: { empire_n: 10, empire_w: -50, sturgia: 0, vlandia: 20, khuzait: -50, aserai: -50, battania: 10 },
+    },
+    sturgia: {
+        id: "sturgia",
+        name: "斯特吉亚",
+        color: "cyan",
+        relations: { empire_n: -50, empire_w: 20, empire_s: 0, vlandia: 0, khuzait: -50, aserai: 0, battania: 20 },
+    },
+    aserai: {
+        id: "aserai",
+        name: "阿塞莱",
         color: "red",
-        relations: { f1: 0, f2: 0 },
+        relations: { empire_n: 10, empire_w: 20, empire_s: -50, sturgia: 0, vlandia: 0, khuzait: -50, battania: 0 },
     },
+    vlandia: {
+        id: "vlandia",
+        name: "瓦兰迪亚",
+        color: "blue",
+        relations: { empire_n: 20, empire_w: -50, empire_s: 20, sturgia: 0, aserai: 0, khuzait: 0, battania: -50 },
+    },
+    battania: {
+        id: "battania",
+        name: "巴塔尼亚",
+        color: "green",
+        relations: { empire_n: 20, empire_w: 0, empire_s: 10, sturgia: 20, aserai: 0, vlandia: -50, khuzait: 0 },
+    },
+    khuzait: {
+        id: "khuzait",
+        name: "库赛特",
+        color: "brown",
+        relations: { empire_n: 0, empire_w: 0, empire_s: -50, sturgia: -50, aserai: -50, vlandia: 0, battania: 0 },
+    },
+    // 卡拉迪亚六势力别名（映射到八王国）
+    rf1: { id: "rf1", name: "北帝国", color: "purple", relations: {} },
+    rf2: { id: "rf2", name: "瓦兰迪亚", color: "blue", relations: {} },
+    rf3: { id: "rf3", name: "阿塞莱", color: "red", relations: {} },
+    rf4: { id: "rf4", name: "巴塔尼亚", color: "green", relations: {} },
+    rf5: { id: "rf5", name: "库赛特", color: "brown", relations: {} },
+    rf6: { id: "rf6", name: "斯特吉亚", color: "cyan", relations: {} },
+};
+// rf1-rf6 → 八王国主键（让卡拉迪亚势力参与真实外交）
+export const RF_TO_KINGDOM: Record<string, string> = {
+    rf1: "empire_n", rf2: "vlandia", rf3: "aserai",
+    rf4: "battania", rf5: "khuzait", rf6: "sturgia",
 };
 
 export const QUEST_TEMPLATES = [
@@ -263,7 +307,7 @@ export const COMPANIONS: Record<string, { id: string; name: string; cost: number
     },
 };
 
-export const UNITS: Record<string, { name: string; recruit_cost: number; power: number; upgrade_cost: number; upgrade_to: string | null; promotion_target: string | null; food_consumption: number; prisoner_value: number }> = {
+export const UNITS: Record<string, any> = {
     peasant: {
         name: "农民",
         recruit_cost: 10,
@@ -295,6 +339,8 @@ export const UNITS: Record<string, { name: string; recruit_cost: number; power: 
         prisoner_value: 7,
     },
 };
+
+
 
 export const LOCATIONS: Record<string, any> = {
     oak_village: {
@@ -596,3 +642,27 @@ export const KNIGHT_ORDERS: Record<string, {
         penalty: "违反誓言将被驱逐出骑士团，声望 -30",
     },
 };
+
+// === 骑砍2 兵种 merge 到 UNITS（保持全部消费点兼容）===
+for (const [tid, t] of Object.entries(BANNERLORD_TROOPS)) {
+    if (!UNITS[tid]) {
+        UNITS[tid] = {
+            name: t.name,
+            recruit_cost: t.recruit_cost,
+            power: t.power,
+            upgrade_cost: t.upgrade_cost,
+            upgrade_to: t.upgrade_to,
+            promotion_target: t.is_noble ? null : t.upgrade_to,
+            food_consumption: t.food_consumption,
+            prisoner_value: t.prisoner_value,
+            // 额外字段（可选）
+            culture: t.culture,
+            culture_zh: t.culture_zh,
+            level: t.level,
+            group: t.group,
+            is_noble: t.is_noble,
+            upgrade_targets: t.upgrade_targets,
+            skills: t.skills,
+        };
+    }
+}
