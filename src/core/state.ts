@@ -124,7 +124,7 @@ export class GameState {
         this.prisoners = data.prisoners ? { ...data.prisoners } : {};
         this.personal_power = data.personal_power ?? 10;
         this.loot = data.loot ? [...data.loot] : [];
-        this.faction_relations = data.faction_relations ? { ...data.faction_relations } : { f1: 0, f2: 0, f3: 0 };
+        this.faction_relations = data.faction_relations ? { ...data.faction_relations } : { empire_n: 0, empire_w: 0, empire_s: 0, sturgia: 0, aserai: 0, vlandia: 0, battania: 0, khuzait: 0, rf1: 0, rf2: 0, rf3: 0, rf4: 0, rf5: 0, rf6: 0 };
         this.active_quests = data.active_quests ? [...data.active_quests] : [];
         this.completed_quests = data.completed_quests ? [...data.completed_quests] : [];
         this.is_king = data.is_king ?? false;
@@ -271,7 +271,7 @@ export class GameState {
             prisoners: data.prisoners ?? {},
             personal_power: data.personal_power ?? 10,
             loot: data.loot ?? [],
-            faction_relations: data.faction_relations ?? { f1: 0, f2: 0, f3: 0 },
+            faction_relations: data.faction_relations ?? { empire_n: 0, empire_w: 0, empire_s: 0, sturgia: 0, aserai: 0, vlandia: 0, battania: 0, khuzait: 0, rf1: 0, rf2: 0, rf3: 0, rf4: 0, rf5: 0, rf6: 0 },
             active_quests: data.active_quests ?? [],
             completed_quests: data.completed_quests ?? [],
             is_king: data.is_king ?? false,
