@@ -28,8 +28,13 @@ export interface EventPopup {
   type: "combat" | "caravan" | "treasure" | "info" | "dialogue";
 }
 
+/** 3D 战斗的敌方部队数据（由 startBattle 暂存，BattleView 读取）。 */
+export interface BattleEnemy {
+  enemyTroops: Record<string, number>;
+  enemyPower: number;
+  description: string;
+}
 const SAVE_KEY = "terminal_tyrant_save";
-
 export function useGame() {
   const [state, setState] = useState<GameState | null>(null);
   const [view, setView] = useState<GameView>("menu");
@@ -38,6 +43,7 @@ export function useGame() {
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(isTTSEnabled());
+  const [battleEnemy, setBattleEnemy] = useState<BattleEnemy | null>(null);
   const stateRef = useRef<GameState | null>(null);
 
   const updateState = useCallback((newState: GameState) => {
@@ -118,8 +124,17 @@ export function useGame() {
     setCombat(null);
     setEventPopup(null);
     setResultMessage(null);
+    setBattleEnemy(null);
     stopSpeaking();
     setView("menu");
+  }, []);
+
+  /** 开启一场 3D 战斗：暂存敌情、清掉文本战斗弹窗并切到战场视图。 */
+  const startBattle = useCallback((enemyTroops: Record<string, number>, enemyPower = 0, description = "") => {
+    setCombat(null);
+    setEventPopup(null);
+    setBattleEnemy({ enemyTroops, enemyPower, description });
+    setView("battle");
   }, []);
 
   const toggleVoice = useCallback(() => {
@@ -137,11 +152,14 @@ export function useGame() {
     eventPopup,
     resultMessage,
     voiceEnabled,
+    battleEnemy,
     toggleVoice,
     setView,
     setCombat,
     setEventPopup,
     setResultMessage,
+    setBattleEnemy,
+    startBattle,
     startNewGame,
     startNewGameWithRegion,
     loadGame,
