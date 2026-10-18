@@ -1188,6 +1188,10 @@ select:focus {
   .battle-mount { min-height: 280px; }
 }
 
+.battle-command {
+  color: var(--accent-gold);
+  white-space: nowrap;
+}
 .battle-over {
   padding: 2px 10px;
   font-weight: 700;

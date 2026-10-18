@@ -29,6 +29,9 @@ import { CombatSystem } from "./CombatSystem";
 import { RenderSystem } from "./RenderSystem";
 import { PlayerControl } from "./PlayerControl";
 import { PlayerInputSystem } from "./PlayerInputSystem";
+import { Formation } from "./Formation";
+import { FormationSystem } from "./FormationSystem";
+import { CommandSystem, type CommandState } from "./CommandSystem";
 import { preloadModels } from "./ModelCache";
 
 /** 战斗结算数据。 */
@@ -72,6 +75,8 @@ export function BattleView({
 
   const [total] = useState({ p: pList.length, e: eList.length });
   const [stats, setStats] = useState<{ p: number; e: number }>({ p: pList.length, e: eList.length });
+  // 指挥状态（阵型 + 指令模式），默认线列阵型
+  const [command, setCommand] = useState<CommandState>({ type: "line", mode: "formation" });
   // 模型加载进度（null = 未开始 / 已完成）
   const [modelProgress, setModelProgress] = useState<{ loaded: number; total: number } | null>(null);
 
@@ -99,16 +104,22 @@ export function BattleView({
     const world = new World();
     worldRef.current = world;
     const playerInputSys = new PlayerInputSystem();
+    const commandSys = new CommandSystem();
+    const formationSys = new FormationSystem();
     const targetingSys = new TargetingSystem();
     const moveSys = new MovementSystem();
     const combatSys = new CombatSystem();
     const renderSys = new RenderSystem(mount);
-    // 执行顺序：玩家输入 → AI 寻敌走位 → 位移 → 交战 → 渲染
+    // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → 交战 → 渲染
     world.addSystem(playerInputSys);
+    world.addSystem(commandSys);
+    world.addSystem(formationSys);
     world.addSystem(targetingSys);
     world.addSystem(moveSys);
     world.addSystem(combatSys);
     world.addSystem(renderSys);
+    // 指挥状态变化 → 更新 HUD（切阵型/指令时触发）
+    commandSys.onChange = (state) => setCommand(state);
     // 玩家攻击命中 → 镜头震动（跨系统回调：CombatSystem 出手 → RenderSystem shake）
     combatSys.onPlayerAttack = () => renderSys.addShake();
     // 生成战场：真实部队（每个实体按兵种规格差异化，并记录兵种 id）
@@ -116,7 +127,8 @@ export function BattleView({
       side: number,
       color: number,
       x0: number,
-      troops: TroopSpec[]
+      troops: TroopSpec[],
+      withFormation = false
     ) => {
       let i = 0;
       for (const spec of troops) {
@@ -132,10 +144,14 @@ export function BattleView({
           .addComponent(new Visual(spec.radius, spec.height))
           .addComponent(new MoveSpeed(spec.speed))
           .addComponent(new TroopType(spec.name));
+        // 玩家方军队挂阵型组件（默认 line，锚点=初始生成点，角度指向敌方）
+        if (withFormation) {
+          e.addComponent(new Formation("line", 0, x0, 0));
+        }
         i++;
       }
     };
-    spawnArmy(0, 0x4a90ff, 8, pList);
+    spawnArmy(0, 0x4a90ff, 8, pList, true);
     spawnArmy(1, 0xff5050, -8, eList);
     // 玩家英雄实体：蓝色、体积 1.5 倍、高血量高攻击，带 PlayerControl
     const player = world.createEntity();
@@ -151,6 +167,7 @@ export function BattleView({
       .addComponent(new PlayerControl())
       .addComponent(new TroopType("player"));
     playerInputSys.setPlayer(player);
+    commandSys.setPlayer(player);
     world.start();
     return () => {
       world.stop();
@@ -158,6 +175,8 @@ export function BattleView({
       world.removeSystem(combatSys);
       world.removeSystem(moveSys);
       world.removeSystem(targetingSys);
+      world.removeSystem(formationSys);
+      world.removeSystem(commandSys);
       world.removeSystem(playerInputSys);
       worldRef.current = null;
       endedRef.current = false;
@@ -235,6 +254,10 @@ export function BattleView({
         <span>
           ⚔ ECS 战场 · 蓝 {stats.p}/{total.p} · 红 {stats.e}/{total.e}
         </span>
+        <span className="battle-command">
+          阵型：{FORMATION_NAMES[command.type]}（{COMMAND_NAMES[command.mode]}）｜
+          [1]线列 [2]楔形 [3]圆形 [4]纵队 [5]散兵 [F]冲锋 [H]驻守 [R]撤退
+        </span>
         {modelProgress && (
           <span className="battle-loading">
             ⏳ 加载模型 {modelProgress.loaded}/{modelProgress.total}
@@ -247,7 +270,21 @@ export function BattleView({
 }
 
 // ===== 辅助函数 =====
-
+/** 阵型类型 → 中文名（HUD 显示）。 */
+const FORMATION_NAMES: Record<string, string> = {
+  line: "线列",
+  wedge: "楔形",
+  circle: "圆形",
+  column: "纵队",
+  loose: "散兵",
+};
+/** 指令模式 → 中文名（HUD 显示）。 */
+const COMMAND_NAMES: Record<string, string> = {
+  formation: "列阵",
+  charge: "冲锋",
+  hold: "驻守",
+  retreat: "撤退",
+};
 /** 把 troopId->count 展开为 TroopSpec 数组（按 UNITS.power 推导属性），并截断到上限。 */
 function expandTroops(troops: Record<string, number>, max: number): TroopSpec[] {
   const out: TroopSpec[] = [];

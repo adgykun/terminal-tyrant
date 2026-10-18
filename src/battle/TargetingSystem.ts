@@ -17,6 +17,7 @@ import { Attack } from "./Attack";
 import { Target } from "./Target";
 import { MoveSpeed } from "./MoveSpeed";
 import { PlayerControl } from "./PlayerControl";
+import { Formation } from "./Formation";
 
 export class TargetingSystem extends System {
   /** 与友军的最小间距（排斥半径）。 */
@@ -25,6 +26,8 @@ export class TargetingSystem extends System {
   private static readonly MAX_LOCK = 3;
   /** z 轴向交战对齐容差（与 CombatSystem 一致）。 */
   private static readonly LOCK_TOL = 1.2;
+  /** 阵型单位防御交战的寻敌半径（攻击范围 + 余量）。 */
+  private static readonly DEFEND_RANGE = 4.0;
   constructor() {
     super("TargetingSystem");
   }
@@ -32,6 +35,12 @@ export class TargetingSystem extends System {
     const units = this.world.query(Position, Velocity, Team, Health, Attack, Target, MoveSpeed);
     // 0. 排除玩家控制实体（玩家由 PlayerInputSystem 直接操控，AI 不寻敌/不走位/不被排斥）
     const aiUnits = units.filter((u) => !u.hasComponent(PlayerControl));
+    // 0.5 阵型模式判定：非冲锋的玩家方阵型单位（formation / hold / retreat）
+    //    保持阵型位置，不走位、不排斥；只有敌人进入防御半径才锁定交战。
+    const inFormation = (u: Entity): boolean => {
+      const f = u.getComponent(Formation);
+      return !!f && u.getComponent(Team)!.side === 0 && f.mode !== "charge";
+    };
     // 1. 清理失效目标
     for (const u of aiUnits) {
       const t = u.getComponent(Target)!;
@@ -54,11 +63,13 @@ export class TargetingSystem extends System {
         lockCount.set(t.targetId, (lockCount.get(t.targetId) ?? 0) + 1);
       }
     }
-    // 3. 无目标者寻敌：最近且未满员；全满则退化为最近敌人
+    // 3. 无目标者寻敌：最近且未满员；全满则退化为最近敌人。
+    //    阵型单位（formation/hold/retreat）只在防御半径内寻敌交战，保持阵型站位
     for (const u of aiUnits) {
       const t = u.getComponent(Target)!;
       if (t.targetId != null) continue;
       const side = u.getComponent(Team)!.side;
+      const defend = inFormation(u);
       let best: Entity | null = null;
       let bestDist = Infinity;
       for (const o of units) {
@@ -66,13 +77,14 @@ export class TargetingSystem extends System {
         if (o.getComponent(Team)!.side === side) continue;
         if (!o.getComponent(Health)!.alive) continue;
         const d = this.distSq(u, o);
+        if (defend && d > TargetingSystem.DEFEND_RANGE * TargetingSystem.DEFEND_RANGE) continue;
         const locked = lockCount.get(o.id) ?? 0;
         if (locked < TargetingSystem.MAX_LOCK && d < bestDist) {
           best = o;
           bestDist = d;
         }
       }
-      // 满员兜底：找最近敌人
+      // 满员兜底：找最近敌人（阵型单位同样受防御半径约束）
       if (!best) {
         let fallbackDist = Infinity;
         for (const o of units) {
@@ -80,6 +92,7 @@ export class TargetingSystem extends System {
           if (o.getComponent(Team)!.side === side) continue;
           if (!o.getComponent(Health)!.alive) continue;
           const d = this.distSq(u, o);
+          if (defend && d > TargetingSystem.DEFEND_RANGE * TargetingSystem.DEFEND_RANGE) continue;
           if (d < fallbackDist) {
             best = o;
             fallbackDist = d;
@@ -92,8 +105,10 @@ export class TargetingSystem extends System {
       }
     }
 
-    // 4. 走位：朝目标移动，攻击距离内停下
+    // 4. 走位：朝目标移动，攻击距离内停下。
+    //    阵型单位不走位（位置由 FormationSystem 维护；hold 置零；retreat 由 FormationSystem 驱动）
     for (const u of aiUnits) {
+      if (inFormation(u)) continue;
       const v = u.getComponent(Velocity)!;
       const t = u.getComponent(Target)!;
       if (t.targetId == null) continue;
@@ -116,11 +131,14 @@ export class TargetingSystem extends System {
       }
     }
 
-    // 5. 友军排斥（直接微移 Position，防止重叠；玩家除外，避免被 AI 挤走）
+    // 5. 友军排斥（直接微移 Position，防止重叠；玩家除外，避免被 AI 挤走）。
+    //    阵型单位不参与排斥（位置由阵型槽位决定，排斥会破坏阵型）
     for (let i = 0; i < aiUnits.length; i++) {
       const a = aiUnits[i];
+      if (inFormation(a)) continue;
       for (let j = i + 1; j < aiUnits.length; j++) {
         const b = aiUnits[j];
+        if (inFormation(b)) continue;
         if (a.getComponent(Team)!.side !== b.getComponent(Team)!.side) continue;
         const pa = a.getComponent(Position)!;
         const pb = b.getComponent(Position)!;
