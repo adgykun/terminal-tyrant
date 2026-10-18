@@ -7,3 +7,4 @@ dist/
 
 # audio lib (managed via GitHub API, local copy for build only)
 public/audio/**/*.mp3
+public/videos/**/*.mp4
