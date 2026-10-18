@@ -12,7 +12,7 @@ import { QuestPanel } from "./components/QuestPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
 import { BattleView } from "./battle/BattleView";
-import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army } from "./core/engine";
+import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops } from "./core/engine";
 
 export default function App() {
   const game = useGame();
@@ -35,7 +35,9 @@ export default function App() {
                 if (s.selected_region && s.region_locations) {
                   const [ok, msg, evt] = move_region(s, tid);
                   if (ok && evt && evt.type === "combat") {
-                    game.setCombat({ enemyPower: evt.enemy_power ?? 10, result: null, description: evt.description ?? "" });
+                    // 3D 战斗：生成敌军并挂标记，App 依据标记切视图
+                    const battle = trigger_battle(s, power_to_enemy_troops(evt.enemy_power ?? 10), evt.description ?? "");
+                    return { ok, msg, evt, battle };
                   } else if (ok && evt && (evt.type === "caravan" || evt.type === "treasure")) {
                     game.setEventPopup({
                       title: evt.type === "caravan" ? "遭遇商队" : "发现宝藏",
@@ -47,7 +49,9 @@ export default function App() {
                 } else {
                   const [ok, msg, evt] = move(s, tid);
                   if (ok && evt && evt.type === "combat") {
-                    game.setCombat({ enemyPower: evt.enemy_power ?? 10, result: null, description: evt.description ?? "" });
+                    // 3D 战斗：生成敌军并挂标记，App 依据标记切视图
+                    const battle = trigger_battle(s, power_to_enemy_troops(evt.enemy_power ?? 10), evt.description ?? "");
+                    return { ok, msg, evt, battle };
                   } else if (ok && evt && (evt.type === "caravan" || evt.type === "treasure")) {
                     game.setEventPopup({
                       title: evt.type === "caravan" ? "遭遇商队" : "发现宝藏",
@@ -58,14 +62,20 @@ export default function App() {
                   return { ok, msg, evt };
                 }
               }, targetId);
+              // 处理 3D 战斗标记：切到 battle 视图并带上敌方部队
+              if (result && result.battle) {
+                game.startBattle(result.battle.enemy_troops, result.battle.enemy_power, result.battle.description);
+              }
               return result;
             }}
             onFreeMove={(dist, onRoad) => {
-              game.performAction((s: any) => {
+              const res = game.performAction((s: any) => {
                 const { events, daysPassed } = advance_free_move(s, dist, onRoad);
+                let pendingBattle: any = null;
                 for (const ev of events) {
                   if (ev.type === "combat") {
-                    game.setCombat({ enemyPower: ev.enemy_power ?? 10, result: null, description: ev.description ?? "" });
+                    // 3D 战斗：生成敌军并挂标记
+                    pendingBattle = trigger_battle(s, power_to_enemy_troops(ev.enemy_power ?? 10), ev.description ?? "");
                   } else if (ev.type === "caravan" || ev.type === "treasure") {
                     game.setEventPopup({
                       title: ev.type === "caravan" ? "遭遇商队" : "发现宝藏",
@@ -74,19 +84,46 @@ export default function App() {
                     });
                   }
                 }
-                return { ok: true, daysPassed };
+                return { ok: true, daysPassed, pendingBattle };
               });
+              if (res && res.pendingBattle) {
+                game.startBattle(res.pendingBattle.enemy_troops, res.pendingBattle.enemy_power, res.pendingBattle.description);
+              }
             }}
             onEnterTown={() => game.setView("town")}
             onUnitCombat={(ep, desc) => {
-              game.setCombat({ enemyPower: ep, result: null, description: desc });
+              // 地图单位交战 → 3D 战斗
+              const res = game.performAction((s: any) => {
+                const battle = trigger_battle(s, power_to_enemy_troops(ep), desc);
+                return { battle };
+              });
+              if (res && res.battle) {
+                game.startBattle(res.battle.enemy_troops, res.battle.enemy_power, res.battle.description);
+              }
+            }}
+            onStartBattle={(enemyTroops, desc) => {
+              // 3D 战斗入口（WorldMapCanvas 已折算好敌军）
+              const res = game.performAction((s: any) => {
+                const battle = trigger_battle(s, enemyTroops, desc);
+                return { battle };
+              });
+              if (res && res.battle) {
+                game.startBattle(res.battle.enemy_troops, res.battle.enemy_power, res.battle.description);
+              }
             }}
             onUnitInteract={(u) => {
               const txt = u.type === "caravan" ? "商队表示可以与你交易货物（尚未实现跑商）。" : "旅人向你打听附近的情报（尚未实现 NPC 对话）。";
               game.setEventPopup({ title: u.type === "caravan" ? "遇到商队" : "遇到旅人", description: txt, type: "info" });
             }}
             onPassBattle={(garrison) => {
-              game.setCombat({ enemyPower: garrison, result: null, description: "攻克关隘" });
+              // 关隘守军 → 3D 战斗
+              const res = game.performAction((s: any) => {
+                const battle = trigger_battle(s, power_to_enemy_troops(garrison), "攻克关隘");
+                return { battle };
+              });
+              if (res && res.battle) {
+                game.startBattle(res.battle.enemy_troops, res.battle.enemy_power, res.battle.description);
+              }
             }}
             onCamp={() => {
               game.performAction((s: any) => {
@@ -124,6 +161,7 @@ export default function App() {
         return (
           <BattleView
             playerTroops={gs.troops}
+            enemyTroops={game.battleEnemy?.enemyTroops}
             onBattleEnd={(result) => {
               // 战斗结束：把按兵种伤亡精确写回 state.troops
               game.performAction((s: any) => {
@@ -140,6 +178,9 @@ export default function App() {
                 );
                 return { message: result.won ? "胜利！伤亡已记入部队。" : "溃败…伤亡已记入部队。" };
               });
+              // 战斗结束：清敌情、回到地图
+              game.setView("map");
+              game.setBattleEnemy?.(null);
             }}
           />
         );
