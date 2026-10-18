@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { GameState } from "../core/state";
 import { LOCATIONS, FACTIONS, POLICIES, COMPANIONS } from "../core/data";
-import { declare_kingdom, assign_lord, set_policy, conquer_location, swear_fealty, renounce_fealty } from "../core/engine";
+import { declare_kingdom, assign_lord, set_policy, conquer_location, swear_fealty, renounce_fealty, declare_war, make_peace, respond_to_call } from "../core/engine";
 import { Crown, Castle, Flag, Settings } from "lucide-react";
 
 interface KingdomPanelProps {
@@ -29,7 +29,22 @@ export function KingdomPanel({ state, performAction }: KingdomPanelProps) {
               <div className="text-sm text-secondary">
                 作为封臣攻击该国敌国部队将获得声望，攻击友军则会关系下降。
               </div>
-              <button className="danger" onClick={() => performAction(renounce_fealty)}>
+              <div className="text-sm mt-12 mb-8">
+                <span className="text-gold text-bold">⚔ 响应号召</span>
+                <span className="text-muted"> 与己方王国敌对的国家，可响应号召打一场</span>
+              </div>
+              {Object.values(FACTIONS).filter((f: any) => {
+                if (!state.vassal_of) return false;
+                const rel = FACTIONS[state.vassal_of]?.relations?.[f.id] ?? 0;
+                return f.id !== state.vassal_of && rel < 0;
+              }).map((f: any) => (
+                <div key={f.id} className="list-item">
+                  <span className="text-bold" style={{ color: f.color === "blue" ? "var(--faction-blue)" : f.color === "green" ? "var(--faction-green)" : f.color === "red" ? "var(--faction-red)" : f.color === "brown" ? "var(--faction-brown)" : "var(--faction-purple)" }}>{f.name}</span>
+                  <span className="text-sm text-muted">敌国</span>
+                  <button onClick={() => performAction(respond_to_call, f.id)}>迎战</button>
+                </div>
+              ))}
+              <button className="danger mt-12" onClick={() => performAction(renounce_fealty)}>
                 叛变脱离
               </button>
             </div>
@@ -127,6 +142,27 @@ export function KingdomPanel({ state, performAction }: KingdomPanelProps) {
         </div>
       </div>
 
+      <div className="panel">
+        <div className="panel-title"><Flag size={22} /> 外交（宣战/停战）</div>
+        <p className="text-sm text-muted mb-12">对八王国宣战或停战，宣战后该国成为敌国（好感 -50），可率军攻打其领地</p>
+        {Object.values(FACTIONS).map((f: any) => {
+          if (!f.id.startsWith("empire_") && !["sturgia", "aserai", "vlandia", "battania", "khuzait"].includes(f.id)) return null;
+          const rel = state.faction_relations?.[f.id] ?? 0;
+          const atWar = rel < 0;
+          return (
+            <div key={f.id} className="list-item">
+              <span className="text-bold" style={{ color: f.color === "blue" ? "var(--faction-blue)" : f.color === "green" ? "var(--faction-green)" : f.color === "red" ? "var(--faction-red)" : f.color === "brown" ? "var(--faction-brown)" : "var(--faction-purple)" }}>{f.name}</span>
+              <span className={"text-sm " + (atWar ? "text-red" : "text-muted")}>{atWar ? `⚔ 交战 (${rel})` : `和平 (${rel > 0 ? `+${rel}` : rel})`}</span>
+              <button
+                className={atWar ? "" : "danger"}
+                onClick={() => performAction(atWar ? make_peace : declare_war, f.id)}
+              >
+                {atWar ? "停战" : "宣战"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
       <div className="panel">
         <div className="panel-title"><Settings size={22} /> 政策设置</div>
         {Object.values(POLICIES).map((policy: any) => (
