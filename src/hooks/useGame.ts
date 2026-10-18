@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { GameState } from "../core/state";
 import * as engine from "../core/engine";
-import { init_region, get_all_regions } from "../core/engine";
+import { init_region } from "../core/engine";
 import { isTTSEnabled, setTSEnabled, speak, stopSpeaking } from "../utils/tts";
 
 export type GameView =
@@ -74,15 +74,6 @@ export function useGame() {
     const gs = new GameState();
     engine.create_character(gs, str, int, charm);
     engine.init_region(gs, "calradia"); // 直接进入卡拉迪亚大陆（骑砍2 单地图）
-    gs.add_log("你踏上了成为'终端暴君'的征途……");
-    updateState(gs);
-    setView("map");
-  }, [updateState]);
-
-  const startNewGameWithRegion = useCallback((str: number, int: number, charm: number, regionId: string) => {
-    const gs = new GameState();
-    engine.create_character(gs, str, int, charm);
-    engine.init_region(gs, regionId);
     gs.add_log("你踏上了成为'终端暴君'的征途……");
     updateState(gs);
     setView("map");
@@ -161,7 +152,6 @@ export function useGame() {
     setBattleEnemy,
     startBattle,
     startNewGame,
-    startNewGameWithRegion,
     loadGame,
     hasSave,
     performAction,
