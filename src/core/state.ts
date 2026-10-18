@@ -23,6 +23,7 @@ export interface GameStateData {
     completed_quests?: any[];
     is_king?: boolean;
     kingdom_name?: string;
+    vassal_of?: string | null;
     current_policy?: string | null;
     lords?: any[];
     log_history?: any[];
@@ -77,6 +78,7 @@ export class GameState {
     completed_quests: any[];
     is_king: boolean;
     kingdom_name: string;
+    vassal_of: string | null;
     current_policy: string | null;
     lords: any[];
     log_history: any[];
@@ -129,6 +131,7 @@ export class GameState {
         this.completed_quests = data.completed_quests ? [...data.completed_quests] : [];
         this.is_king = data.is_king ?? false;
         this.kingdom_name = data.kingdom_name ?? "";
+        this.vassal_of = data.vassal_of ?? null;
         this.current_policy = data.current_policy ?? null;
         this.lords = data.lords ? [...data.lords] : [];
         this.log_history = data.log_history ? [...data.log_history] : [];
@@ -220,6 +223,7 @@ export class GameState {
             completed_quests: [...this.completed_quests],
             is_king: this.is_king,
             kingdom_name: this.kingdom_name,
+            vassal_of: this.vassal_of,
             current_policy: this.current_policy,
             lords: [...this.lords],
             log_history: this.log_history.map(e => ({ ...e })),
@@ -276,6 +280,7 @@ export class GameState {
             completed_quests: data.completed_quests ?? [],
             is_king: data.is_king ?? false,
             kingdom_name: data.kingdom_name ?? "",
+            vassal_of: data.vassal_of ?? null,
             current_policy: data.current_policy ?? null,
             lords: data.lords ?? [],
             log_history: data.log_history ?? [],
