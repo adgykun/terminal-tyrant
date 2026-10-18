@@ -11,7 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { QuestPanel } from "./components/QuestPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
-import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege } from "./core/engine";
+import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army } from "./core/engine";
 
 export default function App() {
   const game = useGame();
@@ -103,6 +103,8 @@ export default function App() {
                 : (s: any) => retreat_siege(s);
               game.performAction(fn as any, locId as any);
             }}
+            onJoinArmy={(armyId) => game.performAction((s: any) => join_army(s, armyId))}
+            onLeaveArmy={() => game.performAction((s: any) => leave_army(s))}
           />
         );
       case "town":
