@@ -236,6 +236,30 @@ export function update_faction_relations(state: any): void {
         return;
     }
 
+    // 玩家视角关系表（state.faction_relations）与静态 FACTIONS.relations 双向同步
+    // 若玩家曾宣战/停战，FACTIONS 静态表也要跟着变（否则 AI 演化会用旧关系）
+    if (state.faction_relations) {
+        for (const kid of KINGDOM_IDS) {
+            const pr = state.faction_relations[kid];
+            if (pr === undefined) continue;
+            // 玩家设置过且与静态不同 → 回写静态表（全双向）
+            for (const other of KINGDOM_IDS) {
+                if (other === kid) continue;
+                // 玩家单边宣战某国，也反映为双向敌对
+                if (pr < 0) {
+                    FACTIONS[kid].relations[other] = Math.min(FACTIONS[kid].relations[other] ?? 0, -20);
+                    FACTIONS[other].relations[kid] = Math.min(FACTIONS[other].relations[kid] ?? 0, -20);
+                } else if (pr >= 0) {
+                    const orig = FACTIONS[kid].relations[other] ?? 0;
+                    if (orig < 0) {
+                        FACTIONS[kid].relations[other] = 0;
+                        FACTIONS[other].relations[kid] = 0;
+                    }
+                }
+            }
+        }
+    }
+
     const [f1_id, f2_id] = randomSample(f_ids, 2);
     if (Math.random() < 0.10) {
         const rel = FACTIONS[f1_id].relations[f2_id] ?? 0;
@@ -243,13 +267,59 @@ export function update_faction_relations(state: any): void {
         if (rel < 0) {
             FACTIONS[f1_id].relations[f2_id] = 20;
             FACTIONS[f2_id].relations[f1_id] = 20;
+            if (state.faction_relations) {
+                state.faction_relations[f1_id] = Math.max(0, state.faction_relations[f1_id] ?? 0);
+                state.faction_relations[f2_id] = Math.max(0, state.faction_relations[f2_id] ?? 0);
+            }
             msg = `【势力外交】${FACTIONS[f1_id].name} 与 ${FACTIONS[f2_id].name} 达成了停战协议！`;
         } else {
             FACTIONS[f1_id].relations[f2_id] = -50;
             FACTIONS[f2_id].relations[f1_id] = -50;
+            if (state.faction_relations) {
+                state.faction_relations[f1_id] = Math.min(-20, state.faction_relations[f1_id] ?? 0);
+                state.faction_relations[f2_id] = Math.min(-20, state.faction_relations[f2_id] ?? 0);
+            }
             msg = `【势力外交】${FACTIONS[f1_id].name} 向 ${FACTIONS[f2_id].name} 正式宣战！`;
         }
         state.add_log(msg);
+    }
+
+    // AI 王国围城事件：敌国大军自动围攻一座城镇（世界动态，玩家可旁观）
+    if (Math.random() < 0.06) {
+        const atWarPairs: [string, string][] = [];
+        for (const a of f_ids) {
+            for (const b of f_ids) {
+                if (a >= b) continue;
+                if ((FACTIONS[a].relations[b] ?? 0) < 0) atWarPairs.push([a, b]);
+            }
+        }
+        if (atWarPairs.length > 0) {
+            const [atk, def] = randomChoice(atWarPairs);
+            // 找防御方领地
+            const defLocs = Object.values(LOCATIONS).filter((l: any) => {
+                const k = RF_TO_KINGDOM[l.faction_id] || l.faction_id;
+                return k === def;
+            });
+            if (defLocs.length > 0) {
+                const target = randomChoice(defLocs);
+                const newsMsg = `【战场情报】${FACTIONS[atk].name} 大军正在围攻 ${FACTIONS[def].name} 的 [${target.name}]！你可以在王国面板响应号召，或亲自前往支援。`;
+                state.add_log(newsMsg);
+                // AI 围城真实演化：55% 概率破城易主（攻方拿下守方城镇）
+                if (Math.random() < 0.55) {
+                    target.faction_id = RF_TO_KINGDOM[atk] || atk;
+                    const resultMsg = `【战报】${FACTIONS[atk].name} 攻陷了 ${FACTIONS[def].name} 的 [${target.name}]！`;
+                    state.add_log(resultMsg);
+                    // 若玩家在该城有利益（封地/所在地）则给提示
+                    if (state.location === target.id) {
+                        state.add_log(`你所在的城市 [${target.name}] 已被 ${FACTIONS[atk].name} 占领！`);
+                    }
+                    if (state.fiefs.includes(target.id)) {
+                        state.fiefs = state.fiefs.filter((f: string) => f !== target.id);
+                        state.add_log(`你的封地 [${target.name}] 被 ${FACTIONS[atk].name} 夺走！`);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1321,6 +1391,32 @@ export function retreat_siege(state: any): string {
     const loc = get_location(state, state.siege.location_id);
     const msg = `你从 [${loc?.name ?? ""}] 撤军，围城失败。`;
     state.siege = null;
+    state.add_log(msg);
+    return msg;
+}
+/** 封臣加入王国军团（跟随军团行军/参战）。 */
+export function join_army(state: any, army_id: string): string {
+    if (!state.vassal_of) {
+        return `只有效忠王国的封臣才能加入王国军团！`;
+    }
+    if (state.joined_army) {
+        return `你已加入另一支军团，先脱离再加入新军团。`;
+    }
+    if (!army_id || !army_id.startsWith("army_")) {
+        return `无效的军团标识。`;
+    }
+    state.joined_army = army_id;
+    const msg = `你加入了 ${state.vassal_of ? FACTIONS[state.vassal_of]?.name ?? "王国" : "王国"} 军团 [${army_id}]，将随军团行军作战。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 脱离当前军团。 */
+export function leave_army(state: any): string {
+    if (!state.joined_army) {
+        return `你当前未加入任何军团。`;
+    }
+    state.joined_army = null;
+    const msg = `你脱离了王国军团，恢复独立行动。`;
     state.add_log(msg);
     return msg;
 }
