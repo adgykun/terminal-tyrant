@@ -3,6 +3,12 @@
  *
  * 只做挂载/卸载；World、System、实体都在此初始化与释放。
  * TargetingSystem 寻敌走位 → MovementSystem 位移 → CombatSystem 交战 → RenderSystem 渲染。
+ *
+ * 战斗结束（任一方全灭）时通过 onBattleEnd 回传结算：
+ *   { won, casualties, survivors }
+ *   - won:        玩家方（side 0）是否获胜
+ *   - casualties: 阵亡按兵种统计（troopId -> 数量）
+ *   - survivors:  幸存按兵种统计（troopId -> 数量）
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { World } from "../ecs/World";
@@ -16,10 +22,21 @@ import { Target } from "./Target";
 import { Visual } from "./Visual";
 import { MoveSpeed } from "./MoveSpeed";
 import { getTroopSpec, type TroopSpec } from "./TroopClass";
+import { TroopType } from "./TroopType";
 import { MovementSystem } from "./MovementSystem";
 import { TargetingSystem } from "./TargetingSystem";
 import { CombatSystem } from "./CombatSystem";
 import { RenderSystem } from "./RenderSystem";
+
+/** 战斗结算数据。 */
+export interface BattleEndResult {
+  /** 玩家方（side 0）是否获胜。 */
+  won: boolean;
+  /** 玩家方阵亡按兵种统计（troopId -> 数量）。 */
+  casualties: Record<string, number>;
+  /** 玩家方幸存按兵种统计（troopId -> 数量）。 */
+  survivors: Record<string, number>;
+}
 
 interface BattleViewProps {
   /** 玩家方真实部队（troopId -> 数量）；缺省时用演示兵力。 */
@@ -28,15 +45,20 @@ interface BattleViewProps {
   enemyTroops?: Record<string, number>;
   /** 每军最大实体数（防卡顿）。 */
   maxUnits?: number;
+  /** 战斗结束回调（任一方全灭时触发一次）。 */
+  onBattleEnd?: (result: BattleEndResult) => void;
 }
 
 export function BattleView({
   playerTroops,
   enemyTroops,
   maxUnits = 60,
+  onBattleEnd,
 }: BattleViewProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<World | null>(null);
+  const onBattleEndRef = useRef(onBattleEnd);
+  onBattleEndRef.current = onBattleEnd;
 
   // 解析两侧部队（默认演示 24v24 农民 vs 步兵）
   const pList = useMemo(() => expandTroops(playerTroops ?? { peasant: 12, infantry: 12 }, maxUnits), [playerTroops, maxUnits]);
@@ -48,11 +70,13 @@ export function BattleView({
   const [total] = useState({ p: pList.length, e: eList.length });
   const [stats, setStats] = useState<{ p: number; e: number }>({ p: pList.length, e: eList.length });
 
+  // 战斗结束只触发一次
+  const endedRef = useRef(false);
+
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
 
-    // 1. 创建 World + Systems（顺序：targeting → movement → combat → render）
     const world = new World();
     worldRef.current = world;
     const targetingSys = new TargetingSystem();
@@ -64,8 +88,13 @@ export function BattleView({
     world.addSystem(combatSys);
     world.addSystem(renderSys);
 
-    // 2. 生成战场：真实部队（每个实体按兵种规格差异化）
-    const spawnArmy = (side: number, color: number, x0: number, troops: TroopSpec[]) => {
+    // 生成战场：真实部队（每个实体按兵种规格差异化，并记录兵种 id）
+    const spawnArmy = (
+      side: number,
+      color: number,
+      x0: number,
+      troops: TroopSpec[]
+    ) => {
       let i = 0;
       for (const spec of troops) {
         const col = i % 6;
@@ -78,17 +107,16 @@ export function BattleView({
           .addComponent(new Attack(spec.damage, spec.range, spec.cooldown))
           .addComponent(new Target(null))
           .addComponent(new Visual(spec.radius, spec.height))
-          .addComponent(new MoveSpeed(spec.speed));
+          .addComponent(new MoveSpeed(spec.speed))
+          .addComponent(new TroopType(spec.name));
         i++;
       }
     };
     spawnArmy(0, 0x4a90ff, 8, pList);
     spawnArmy(1, 0xff5050, -8, eList);
 
-    // 3. 启动主循环
     world.start();
 
-    // 4. cleanup：释放
     return () => {
       world.stop();
       world.removeSystem(renderSys);
@@ -96,6 +124,7 @@ export function BattleView({
       world.removeSystem(moveSys);
       world.removeSystem(targetingSys);
       worldRef.current = null;
+      endedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pList, eList]);
@@ -105,17 +134,51 @@ export function BattleView({
     const iv = setInterval(() => {
       const w = worldRef.current;
       if (!w) return;
+
       let p = 0;
       let e = 0;
+      const pSurvivors: Record<string, number> = {};
+      const pCasualties: Record<string, number> = {};
+      const initialP = new Map<string, number>();
+      pList.forEach((s) => {
+        initialP.set(s.name, (initialP.get(s.name) ?? 0) + 1);
+      });
+
       w.forEach((ent) => {
         const t = ent.getComponent(Team);
-        if (t && t.side === 0) p++;
-        else if (t) e++;
+        const tt = ent.getComponent(TroopType);
+        const id = tt?.id ?? "unknown";
+        if (!t) return;
+        if (t.side === 0) {
+          p++;
+          pSurvivors[id] = (pSurvivors[id] ?? 0) + 1;
+        } else {
+          e++;
+        }
       });
+
+      // 玩家方阵亡 = 初始数 - 幸存数
+      for (const [id, cnt] of initialP) {
+        const alive = pSurvivors[id] ?? 0;
+        const lost = cnt - alive;
+        if (lost > 0) pCasualties[id] = lost;
+      }
+
       setStats({ p, e });
+
+      // 战斗结束判定：任一方归零，且未触发过
+      if ((p <= 0 || e <= 0) && !endedRef.current) {
+        endedRef.current = true;
+        const won = e <= 0;
+        onBattleEndRef.current?.({
+          won,
+          casualties: pCasualties,
+          survivors: pSurvivors,
+        });
+      }
     }, 250);
     return () => clearInterval(iv);
-  }, []);
+  }, [pList]);
 
   const over = stats.p <= 0 ? "红方获胜" : stats.e <= 0 ? "蓝方获胜" : null;
 
