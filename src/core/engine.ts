@@ -818,6 +818,27 @@ export function move(state: any, target_location_id: string): [boolean, string, 
     return [true, `顺利到达 ${target_loc.name}`, event_data];
 }
 
+/** 按敌方战力（power）折算成一支配得上的混合敌军（供 3D 战场生成实体）。 */
+export function power_to_enemy_troops(enemy_power: number): Record<string, number> {
+    const n = Math.max(1, Math.round(enemy_power / 2));
+    const peasant = Math.round(n * 0.5);
+    const archer = Math.round(n * 0.3);
+    const infantry = Math.max(0, n - peasant - archer);
+    return { peasant, archer, infantry };
+}
+
+/** 大地图遭遇：标记一场即将开始的 3D 战斗，不直接结算。
+ *  把敌方部队挂到 state.pending_battle 供存档，并返回标记，
+ *  App 层据此切到 "battle" 视图、把 enemy_troops 传给 BattleView。 */
+export function trigger_battle(state: any, enemy_troops: Record<string, number>, description = ""): any {
+    const enemy_power = calculate_army_power(enemy_troops);
+    state.pending_battle = { enemy_troops, enemy_power, description };
+    if (state.add_log) {
+        state.add_log(`遭遇战！${description} 敌方兵力 ${enemy_power}。`);
+    }
+    return { trigger: "battle", enemy_troops, enemy_power, description };
+}
+
 /** 结算简单战斗模式（包含装备加成、战利品与俘虏）。 */
 export function resolve_combat_simple(state: any, enemy_power: number, choice: string): any {
     let eq_bonus = 0;
