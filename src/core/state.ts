@@ -24,6 +24,7 @@ export interface GameStateData {
     is_king?: boolean;
     kingdom_name?: string;
     vassal_of?: string | null;
+    siege?: { location_id: string; days_remaining: number; garrison: number } | null;
     current_policy?: string | null;
     lords?: any[];
     log_history?: any[];
@@ -79,6 +80,7 @@ export class GameState {
     is_king: boolean;
     kingdom_name: string;
     vassal_of: string | null;
+    siege: { location_id: string; days_remaining: number; garrison: number } | null;
     current_policy: string | null;
     lords: any[];
     log_history: any[];
@@ -132,6 +134,7 @@ export class GameState {
         this.is_king = data.is_king ?? false;
         this.kingdom_name = data.kingdom_name ?? "";
         this.vassal_of = data.vassal_of ?? null;
+        this.siege = data.siege ? { ...data.siege } : null;
         this.current_policy = data.current_policy ?? null;
         this.lords = data.lords ? [...data.lords] : [];
         this.log_history = data.log_history ? [...data.log_history] : [];
@@ -224,6 +227,7 @@ export class GameState {
             is_king: this.is_king,
             kingdom_name: this.kingdom_name,
             vassal_of: this.vassal_of,
+            siege: this.siege ? { ...this.siege } : null,
             current_policy: this.current_policy,
             lords: [...this.lords],
             log_history: this.log_history.map(e => ({ ...e })),
@@ -281,6 +285,7 @@ export class GameState {
             is_king: data.is_king ?? false,
             kingdom_name: data.kingdom_name ?? "",
             vassal_of: data.vassal_of ?? null,
+            siege: data.siege ? { ...data.siege } : null,
             current_policy: data.current_policy ?? null,
             lords: data.lords ?? [],
             log_history: data.log_history ?? [],
