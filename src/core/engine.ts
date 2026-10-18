@@ -1290,8 +1290,8 @@ export function set_policy(state: any, policy_id: string): string {
     return msg;
 }
 
-/** 将现有部队兵种晋升为高级兵种。 */
-export function upgrade_unit(state: any, unit_id: string, quantity: number): string {
+/** 将现有部队兵种晋升为高级兵种（可指定分支目标 target_id）。 */
+export function upgrade_unit(state: any, unit_id: string, quantity: number, target_id?: string): string {
     if (quantity <= 0) {
         return "晋升数量必须大于 0";
     }
@@ -1304,7 +1304,7 @@ export function upgrade_unit(state: any, unit_id: string, quantity: number): str
         return `兵员不足！当前拥有 ${unit_name}：${current_count}，尝试晋升：${quantity}`;
     }
 
-    const upgrade_to_id = unit_info.upgrade_to;
+    const upgrade_to_id = target_id && (unit_info.upgrade_targets?.includes(target_id)) ? target_id : unit_info.upgrade_to;
     if (!upgrade_to_id || !(upgrade_to_id in UNITS)) {
         return `兵种 '${unit_name}' 无法继续晋升`;
     }
