@@ -8,6 +8,8 @@ import {
   trade,
   recruit,
   visit_tavern,
+  tournament_battle,
+  hire_mercenary,
   visit_smithy,
   visit_arena,
   gamble_dice,
@@ -155,6 +157,8 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
                 <div className="flex-row gap-8">
                   <button className="primary" onClick={() => performAction(visit_tavern, "drink", 20)}>喝酒（-20 金）</button>
                   <button className="secondary" onClick={() => performAction(visit_tavern, "rumor")}>打听传闻</button>
+                  <button className="secondary" onClick={() => performAction(hire_mercenary, "eastern_mercenary", 1)}>雇东方雇佣兵（{UNITS.eastern_mercenary?.recruit_cost ?? 150} 金）</button>
+                  <button className="secondary" onClick={() => performAction(hire_mercenary, "western_mercenary", 1)}>雇西方雇佣兵（{UNITS.western_mercenary?.recruit_cost ?? 150} 金）</button>
                 </div>
                 <div className="mt-12">
                   <SlotMachine cash={state.cash} performAction={performAction} />
@@ -167,6 +171,7 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
                 <div className="flex-row gap-8">
                   <button className="primary" onClick={() => performAction(visit_arena, "fight")}>挑战比武</button>
                   <button className="secondary" onClick={() => performAction(visit_arena, "bet", 50)}>下注（-50 金）</button>
+                  <button className="primary" onClick={() => performAction(tournament_battle, state.location)}>竞技大会（多轮淘汰）</button>
                 </div>
               </div>
             )}
