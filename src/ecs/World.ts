@@ -38,6 +38,11 @@ export class World {
     }
   }
 
+  /** 按 id 取实体；不存在返回 undefined。 */
+  getEntity(id: number): Entity | undefined {
+    return this.entities.get(id);
+  }
+
   /** 查询拥有全部指定组件的实体列表。 */
   query(...need: ComponentCtor[]): Entity[] {
     const result: Entity[] = [];
