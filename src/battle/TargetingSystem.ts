@@ -16,6 +16,7 @@ import { Health } from "./Health";
 import { Attack } from "./Attack";
 import { Target } from "./Target";
 import { MoveSpeed } from "./MoveSpeed";
+import { PlayerControl } from "./PlayerControl";
 
 export class TargetingSystem extends System {
   /** 与友军的最小间距（排斥半径）。 */
@@ -24,16 +25,15 @@ export class TargetingSystem extends System {
   private static readonly MAX_LOCK = 3;
   /** z 轴向交战对齐容差（与 CombatSystem 一致）。 */
   private static readonly LOCK_TOL = 1.2;
-
   constructor() {
     super("TargetingSystem");
   }
-
   update(_dt: number): void {
     const units = this.world.query(Position, Velocity, Team, Health, Attack, Target, MoveSpeed);
-
+    // 0. 排除玩家控制实体（玩家由 PlayerInputSystem 直接操控，AI 不寻敌/不走位/不被排斥）
+    const aiUnits = units.filter((u) => !u.hasComponent(PlayerControl));
     // 1. 清理失效目标
-    for (const u of units) {
+    for (const u of aiUnits) {
       const t = u.getComponent(Target)!;
       if (t.targetId == null) continue;
       const target = this.world.getEntity(t.targetId);
@@ -48,15 +48,14 @@ export class TargetingSystem extends System {
 
     // 2. 统计当前各敌人被锁数
     const lockCount = new Map<number, number>();
-    for (const u of units) {
+    for (const u of aiUnits) {
       const t = u.getComponent(Target)!;
       if (t.targetId != null) {
         lockCount.set(t.targetId, (lockCount.get(t.targetId) ?? 0) + 1);
       }
     }
-
     // 3. 无目标者寻敌：最近且未满员；全满则退化为最近敌人
-    for (const u of units) {
+    for (const u of aiUnits) {
       const t = u.getComponent(Target)!;
       if (t.targetId != null) continue;
       const side = u.getComponent(Team)!.side;
@@ -94,7 +93,7 @@ export class TargetingSystem extends System {
     }
 
     // 4. 走位：朝目标移动，攻击距离内停下
-    for (const u of units) {
+    for (const u of aiUnits) {
       const v = u.getComponent(Velocity)!;
       const t = u.getComponent(Target)!;
       if (t.targetId == null) continue;
@@ -117,11 +116,11 @@ export class TargetingSystem extends System {
       }
     }
 
-    // 5. 友军排斥（直接微移 Position，防止重叠）
-    for (let i = 0; i < units.length; i++) {
-      const a = units[i];
-      for (let j = i + 1; j < units.length; j++) {
-        const b = units[j];
+    // 5. 友军排斥（直接微移 Position，防止重叠；玩家除外，避免被 AI 挤走）
+    for (let i = 0; i < aiUnits.length; i++) {
+      const a = aiUnits[i];
+      for (let j = i + 1; j < aiUnits.length; j++) {
+        const b = aiUnits[j];
         if (a.getComponent(Team)!.side !== b.getComponent(Team)!.side) continue;
         const pa = a.getComponent(Position)!;
         const pb = b.getComponent(Position)!;
