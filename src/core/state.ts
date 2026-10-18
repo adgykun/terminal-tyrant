@@ -25,7 +25,9 @@ export interface GameStateData {
     kingdom_name?: string;
     vassal_of?: string | null;
     siege?: { location_id: string; days_remaining: number; garrison: number } | null;
+    ai_sieges?: { location_id: string; attacker: string; defender: string; days_remaining: number; strength: number }[];
     joined_army?: string | null;  // 加入的王国军团 id（跟随行军）
+    influence?: number;  // 王国影响力（封臣核心资源）
     current_policy?: string | null;
     lords?: any[];
     log_history?: any[];
@@ -82,7 +84,9 @@ export class GameState {
     kingdom_name: string;
     vassal_of: string | null;
     siege: { location_id: string; days_remaining: number; garrison: number } | null;
+    ai_sieges: { location_id: string; attacker: string; defender: string; days_remaining: number; strength: number }[];
     joined_army: string | null;
+    influence: number;
     current_policy: string | null;
     lords: any[];
     log_history: any[];
@@ -137,7 +141,9 @@ export class GameState {
         this.kingdom_name = data.kingdom_name ?? "";
         this.vassal_of = data.vassal_of ?? null;
         this.siege = data.siege ? { ...data.siege } : null;
+        this.ai_sieges = data.ai_sieges ? data.ai_sieges.map(x => ({ ...x })) : [];
         this.joined_army = data.joined_army ?? null;
+        this.influence = data.influence ?? 0;
         this.current_policy = data.current_policy ?? null;
         this.lords = data.lords ? [...data.lords] : [];
         this.log_history = data.log_history ? [...data.log_history] : [];
@@ -231,7 +237,9 @@ export class GameState {
             kingdom_name: this.kingdom_name,
             vassal_of: this.vassal_of,
             siege: this.siege ? { ...this.siege } : null,
+            ai_sieges: this.ai_sieges.map(x => ({ ...x })),
             joined_army: this.joined_army ?? null,
+            influence: this.influence ?? 0,
             current_policy: this.current_policy,
             lords: [...this.lords],
             log_history: this.log_history.map(e => ({ ...e })),
@@ -290,7 +298,9 @@ export class GameState {
             kingdom_name: data.kingdom_name ?? "",
             vassal_of: data.vassal_of ?? null,
             siege: data.siege ? { ...data.siege } : null,
+            ai_sieges: data.ai_sieges ? data.ai_sieges.map((x: any) => ({ ...x })) : [],
             joined_army: data.joined_army ?? null,
+            influence: data.influence ?? 0,
             current_policy: data.current_policy ?? null,
             lords: data.lords ?? [],
             log_history: data.log_history ?? [],
