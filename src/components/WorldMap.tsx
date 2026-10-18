@@ -11,10 +11,21 @@ interface WorldMapProps {
 }
 
 const factionColorMap: Record<string, string> = {
-  rf1: "var(--faction-blue)",
-  rf2: "var(--faction-green)",
+  rf1: "var(--faction-purple)",
+  rf2: "var(--faction-blue)",
   rf3: "var(--faction-red)",
-  rf4: "#a855f7",
+  rf4: "var(--faction-green)",
+  rf5: "var(--faction-brown)",
+  rf6: "var(--faction-cyan)",
+  // 八王国主键
+  empire_n: "var(--faction-purple)",
+  empire_w: "#6366f1",
+  empire_s: "#a855f7",
+  sturgia: "var(--faction-cyan)",
+  aserai: "var(--faction-red)",
+  vlandia: "var(--faction-blue)",
+  battania: "var(--faction-green)",
+  khuzait: "var(--faction-brown)",
   f1: "var(--faction-blue)",
   f2: "var(--faction-green)",
   f3: "var(--faction-red)",
