@@ -10,6 +10,7 @@ import {
   visit_tavern,
   tournament_battle,
   hire_mercenary,
+  defend_siege,
   visit_smithy,
   visit_arena,
   gamble_dice,
@@ -84,7 +85,7 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
   const facilities: string[] = loc.facilities ?? [];
   const hasSmithy = town_has(loc, "forge");
   const isPort = loc.type === "port";
-
+  const siegeThreat = (state.ai_sieges ?? []).find((t: any) => t.location_id === loc.id);
   return (
     <div>
       <div className="panel">
@@ -98,6 +99,18 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
         <button className="primary" onClick={() => setView("map")}>
           <ArrowLeft size={16} style={{ display: "inline", marginRight: "4px" }} />返回大地图
         </button>
+        {siegeThreat && (
+          <div className="mt-12" style={{ background: "rgba(200,40,40,0.15)", border: "1px solid #b33", borderRadius: 8, padding: "10px 12px" }}>
+            <div className="text-bold" style={{ color: "#f66" }}>⚔ 城池被围攻！</div>
+            <div className="text-sm text-secondary mt-4">
+              敌国大军围攻中（剩 {siegeThreat.days_remaining} 天），你可以 <b>守城迎战</b> 拯救此城；
+              逾期未守将城池易主。
+            </div>
+            <div className="flex-row gap-8 mt-8">
+              <button className="primary" onClick={() => performAction(defend_siege, loc.id)}>⚔ 守城迎战</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {goodsIds.length > 0 && (
