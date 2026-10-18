@@ -13,7 +13,8 @@ export type GameView =
   | "inventory"
   | "quests"
   | "kingdom"
-  | "logs";
+  | "logs"
+  | "battle";
 
 export interface CombatState {
   enemyPower: number;
