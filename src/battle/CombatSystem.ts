@@ -2,17 +2,17 @@
  * CombatSystem —— 接触交战（纯逻辑，无渲染）。
  *
  * 规则：
- *  - 敌对双方在攻击距离内 → 都停下（vx=0）；
- *  - 冷却完毕的一方出手一次，扣目标 Health；
+ *  - 仅对 Target 锁定的敌人交战（锁由 TargetingSystem 维护）；
+ *  - 冷却完毕出手一次，扣目标 Health；
  *  - 血量归零的实体从 World 移除（RenderSystem 会自动销毁其 Mesh）。
  */
 import { System } from "../ecs/System";
 import type { Entity } from "../ecs/Entity";
-import { Position } from "./Position";
-import { Velocity } from "./Velocity";
 import { Team } from "./Team";
 import { Health } from "./Health";
 import { Attack } from "./Attack";
+import { Target } from "./Target";
+import { Position } from "./Position";
 
 export class CombatSystem extends System {
   /** z 轴向的接触判定宽度。 */
@@ -23,7 +23,7 @@ export class CombatSystem extends System {
   }
 
   update(dt: number): void {
-    const units = this.world.query(Position, Velocity, Team, Health, Attack);
+    const units = this.world.query(Position, Team, Health, Attack, Target);
     const dead = new Set<number>();
 
     // 1. 推进全体冷却
@@ -32,26 +32,20 @@ export class CombatSystem extends System {
       atk.timer = Math.max(0, atk.timer - dt);
     }
 
-    // 2. 两两判定（同阵营跳过）
-    for (let i = 0; i < units.length; i++) {
-      const a = units[i];
+    // 2. 对锁定目标交战
+    for (const a of units) {
       if (dead.has(a.id)) continue;
-      for (let j = i + 1; j < units.length; j++) {
-        const b = units[j];
-        if (dead.has(b.id)) continue;
-        if (a.getComponent(Team)!.side === b.getComponent(Team)!.side) continue;
-        if (!this.inContact(a, b)) continue;
+      const t = a.getComponent(Target)!;
+      if (t.targetId == null) continue;
+      const b = this.world.getEntity(t.targetId);
+      if (!b) continue;
+      if (dead.has(b.id)) continue;
+      if (a.getComponent(Team)!.side === b.getComponent(Team)!.side) continue;
+      if (!this.inContact(a, b)) continue;
 
-        // 接触：双方停下
-        a.getComponent(Velocity)!.vx = 0;
-        b.getComponent(Velocity)!.vx = 0;
-
-        // 双方各判定一次出手
-        if (this.tryAttack(a, b)) dead.add(b.id);
-        if (this.tryAttack(b, a) && !dead.has(a.id)) dead.add(a.id);
-        // 每单位每帧只与第一个接触的敌人交战
-        break;
-      }
+      // 双方各判定一次出手
+      if (this.tryAttack(a, b)) dead.add(b.id);
+      if (this.tryAttack(b, a) && !dead.has(a.id)) dead.add(a.id);
     }
 
     // 3. 移除阵亡实体
