@@ -19,7 +19,7 @@ export interface MapUnit {
 
 // 势力名 → hex（与 FACTION_COLORS 对齐）
 // 八王国初始关系（<0 为敌对，用于 AI 军团围城目标选择）
-const KINGDOM_REL: Record<string, Record<string, number>> = {
+export const KINGDOM_REL: Record<string, Record<string, number>> = {
   empire_n: { empire_w: -50, empire_s: 10, sturgia: -50, vlandia: 20, khuzait: 0, aserai: 10, battania: 20 },
   empire_w: { empire_n: -50, empire_s: -50, sturgia: 20, vlandia: -50, khuzait: 0, aserai: 20, battania: 0 },
   empire_s: { empire_n: 10, empire_w: -50, sturgia: 0, vlandia: 20, khuzait: -50, aserai: -50, battania: 10 },
@@ -30,7 +30,7 @@ const KINGDOM_REL: Record<string, Record<string, number>> = {
   khuzait: { empire_n: 0, empire_w: 0, empire_s: -50, sturgia: -50, aserai: -50, vlandia: 0, battania: 0 },
 };
 // 卡拉迪亚 rf 主键 → 八王国主键
-const RF_TO_KINGDOM: Record<string, string> = {
+export const RF_TO_KINGDOM: Record<string, string> = {
   rf1: "empire_n", rf2: "vlandia", rf3: "aserai", rf4: "battania", rf5: "khuzait", rf6: "sturgia",
 };
 const FACTION_HEX: Record<string, string> = {
