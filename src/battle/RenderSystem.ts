@@ -7,7 +7,7 @@ import { System } from "../ecs/System";
 import { Position } from "./Position";
 import { Team } from "./Team";
 import { Visual } from "./Visual";
-
+import { PlayerControl } from "./PlayerControl";
 export class RenderSystem extends System {
   private readonly scene: THREE.Scene;
   /** 摄像机（BattleView 可通过它实现轨道控制/跟随）。 */
@@ -15,7 +15,6 @@ export class RenderSystem extends System {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly meshes = new Map<number, THREE.Mesh>();
   private readonly container: HTMLElement;
-
   // ===== 轨道控制 =====
   private theta = 0;            // 水平角
   private phi = 1.1;            // 俯仰角（clamp 0.25..1.45）
@@ -26,6 +25,10 @@ export class RenderSystem extends System {
   private lastX = 0;
   private lastY = 0;
   private pinchDist = 0;
+  // ===== 镜头震动（玩家攻击命中时触发） =====
+  private shakeTime = 0;
+  private static readonly SHAKE_DURATION = 0.25;
+  private static readonly SHAKE_AMPLITUDE = 0.35;
 
   constructor(container: HTMLElement) {
     super("RenderSystem");
@@ -75,6 +78,7 @@ export class RenderSystem extends System {
 
   update(dt: number): void {
     this.updateFocus(dt);
+    if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
     const alive = new Set<number>();
     for (const e of this.world.query(Position, Team, Visual)) {
       alive.add(e.id);
@@ -124,33 +128,49 @@ export class RenderSystem extends System {
   }
 
   // ===== 轨道控制实现 =====
-
-  /** 平滑跟随战场质心（仅当无人拖拽时）。 */
+  /** 触发一次镜头震动（玩家攻击命中时由 BattleView 调用）。 */
+  addShake(): void {
+    this.shakeTime = RenderSystem.SHAKE_DURATION;
+  }
+  /** 平滑跟随焦点：玩家存活时跟随玩家，否则跟随战场质心（仅当无人拖拽时）。 */
   private updateFocus(dt: number): void {
     if (this.dragging) return;
-    // 计算当前存活单位的平均位置作为焦点
-    let cx = 0;
-    let cz = 0;
-    let n = 0;
+    let targetX: number | null = null;
+    let targetZ: number | null = null;
+    // 优先跟随玩家实体（PlayerControl）
     this.world.forEach((e) => {
+      if (targetX != null) return;
+      if (!e.hasComponent(PlayerControl)) return;
       const pos = e.getComponent(Position);
       if (pos) {
-        cx += pos.x;
-        cz += pos.z;
-        n++;
+        targetX = pos.x;
+        targetZ = pos.z;
       }
     });
-    if (n > 0) {
-      const targetX = cx / n;
-      const targetZ = cz / n;
-      // 平滑移动
-      const lerp = Math.min(1, dt * 2.5);
-      this.target.x += (targetX - this.target.x) * lerp;
-      this.target.z += (targetZ - this.target.z) * lerp;
+    if (targetX == null) {
+      // 玩家阵亡 / 不存在 → 跟随战场质心
+      let cx = 0;
+      let cz = 0;
+      let n = 0;
+      this.world.forEach((e) => {
+        const pos = e.getComponent(Position);
+        if (pos) {
+          cx += pos.x;
+          cz += pos.z;
+          n++;
+        }
+      });
+      if (n > 0) {
+        targetX = cx / n;
+        targetZ = cz / n;
+      }
     }
+    if (targetX == null || targetZ == null) return;
+    const lerp = Math.min(1, dt * 2.5);
+    this.target.x += (targetX - this.target.x) * lerp;
+    this.target.z += (targetZ - this.target.z) * lerp;
   }
-
-  /** 依据轨道参数摆位相机。 */
+  /** 依据轨道参数摆位相机（叠加镜头震动偏移）。 */
   private applyCamera(): void {
     const t = this.target;
     const cosPhi = Math.cos(this.phi);
@@ -162,6 +182,12 @@ export class RenderSystem extends System {
       t.y + this.radius * cosPhi,
       t.z + this.radius * sinPhi * cosTheta
     );
+    if (this.shakeTime > 0) {
+      const k = (this.shakeTime / RenderSystem.SHAKE_DURATION) * RenderSystem.SHAKE_AMPLITUDE;
+      this.camera.position.x += (Math.random() - 0.5) * 2 * k;
+      this.camera.position.y += (Math.random() - 0.5) * 2 * k;
+      this.camera.position.z += (Math.random() - 0.5) * 2 * k;
+    }
     this.camera.lookAt(t.x, t.y, t.z);
   }
 
