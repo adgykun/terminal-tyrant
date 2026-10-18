@@ -89,6 +89,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
   const keysRef = useRef<Record<string, boolean>>({});
 
   // React 状态（只存 UI 层）
+  const hoveredIdRef = useRef<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [traveling, setTraveling] = useState(false);
   const [etaDays, setEtaDays] = useState(0);
@@ -98,6 +99,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
   const travelModeRef = useRef<"free" | "road">("free");
   const freeRef = useRef<{ active: boolean; tx: number; ty: number; distAcc: number }>({ active: false, tx: 0, ty: 0, distAcc: 0 });
   const terrainSeedRef = useRef(0);
+  const [physicalSize, setPhysicalSize] = useState({ w: 0, h: 0 });
   const [dayToast, setDayToast] = useState(0);
 
   // 地点缓存
@@ -132,9 +134,8 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
 
   // === 绘制地形（离屏） ===
   useEffect(() => {
-    const cvs = canvasRef.current;
-    if (!cvs) return;
-    const W = cvs.width, H = cvs.height;
+    if (physicalSize.w === 0 || physicalSize.h === 0) return;
+    const W = physicalSize.w, H = physicalSize.h;
     const off = document.createElement("canvas");
     off.width = W; off.height = H;
     const octx = off.getContext("2d")!;
@@ -151,7 +152,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       octx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
     }
     offscreenRef.current = off;
-  }, [locations.length]);
+  }, [physicalSize.w, physicalSize.h, locations.length]);
 
   // === 坐标变换 ===
   const worldToScreen = useCallback((wx: number, wy: number) => {
@@ -310,6 +311,9 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       // AI 单位 token（活地图）：画在地点层下，玩家旗帜上
       if (unitsRef.current.length) {
         const zoom = cam.zoom * 2;
+        const pxPerWorldUnit = zoom * (window.devicePixelRatio || 1);
+        const TARGET_ICON_PX = 14; // 屏幕目标字号（CSS px），移动端可到 16
+        const worldFontSize = TARGET_ICON_PX / pxPerWorldUnit;
         for (const u of unitsRef.current) {
           const uisSel = selUnitRef.current?.id === u.id;
           // 类型图标（小三角/方块区分）+ 势力色环 + 名字
@@ -320,13 +324,15 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
           ctx.lineWidth = uisSel ? 0.22 : 0.1;
           ctx.strokeStyle = uisSel ? "#ffffff" : "#1a1410";
           ctx.stroke();
-          // 类型标记（内嵌符号）
-          ctx.fillStyle = "#fff";
-          ctx.font = "0.55px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          const sym = u.type === "army" ? "斛" : u.type === "caravan" ? "车" : u.type === "bandit" ? "勾" : "行";
-          ctx.fillText(sym, u.x, u.y + 0.02);
+          // 类型标记（内嵌符号）：按屏幕目标字号反算，LOD 兜底
+          if (pxPerWorldUnit >= 0.5) {
+            ctx.fillStyle = "#fff";
+            ctx.font = worldFontSize + "px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const sym = u.type === "army" ? "斛" : u.type === "caravan" ? "车" : u.type === "bandit" ? "勾" : "行";
+            ctx.fillText(sym, u.x, u.y + 0.02);
+          }
           // 选中外圈 + 名字标签（仅选中/悬停时显示）
           if (uisSel) {
             ctx.beginPath();
@@ -334,7 +340,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
             ctx.strokeStyle = u.color;
             ctx.lineWidth = 0.12;
             ctx.stroke();
-            ctx.font = "0.8px sans-serif";
+            ctx.font = worldFontSize + "px sans-serif";
             ctx.fillStyle = "#fff";
             ctx.textBaseline = "alphabetic";
             ctx.fillText((UNIT_LABEL[u.type] || "") + " \u00b7 " + u.name, u.x, u.y - 1.6);
@@ -347,7 +353,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       for (const loc of locations as any[]) {
         const lx = (loc as any).x, ly = (loc as any).y;
         const isCur = (loc as any).id === state.location;
-        const isHover = (loc as any).id === hoveredId;
+        const isHover = (loc as any).id === hoveredIdRef.current;
         const fColor = FACTION_COLORS[(loc as any).faction_id] || "#888";
 
         // 光晕
@@ -441,7 +447,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
 
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [locations, state.location, onMove, byId, hoveredId]);
+  }, [locations, state.location, onMove, byId]);
 
   // === Canvas 尺寸自适应 ===
   useEffect(() => {
@@ -450,10 +456,13 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
     if (!cvs || !container) return;
     const ro = new ResizeObserver(() => {
       const dpr = window.devicePixelRatio || 1;
-      cvs.width = container.clientWidth * dpr;
-      cvs.height = container.clientHeight * dpr;
+      const w = Math.floor(container.clientWidth * dpr);
+      const h = Math.floor(container.clientHeight * dpr);
+      cvs.width = w;
+      cvs.height = h;
       cvs.style.width = container.clientWidth + "px";
       cvs.style.height = container.clientHeight + "px";
+      setPhysicalSize({ w, h }); // 触发离屏底图重建
     });
     ro.observe(container);
     return () => ro.disconnect();
@@ -550,7 +559,8 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       const sy = (e.clientY - rect.top) * (window.devicePixelRatio || 1);
       const { wx, wy } = screenToWorld(sx, sy);
       const hit = nearest_location_id(locations as any[], wx, wy, HIT_RADIUS);
-      setHoveredId(hit);
+      hoveredIdRef.current = hit;
+      setHoveredId((prev) => (prev === hit ? prev : hit));
     };
 
     const onUp = (e: MouseEvent) => {
@@ -817,8 +827,8 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         </div>
       )}
 
-      {/* 缩放控件 */}
-      <div className="wmc-zoom-controls">
+      {/* 缩放控件（小地图下方，垂直堆叠） */}
+      <div className="wmc-zoom-controls" style={{ position: "absolute", top: 146, right: 20, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
         <button className="wmc-zoom-btn" onClick={zoomIn} title="放大">+</button>
         <button className="wmc-zoom-btn" onClick={zoomOut} title="缩小">−</button>
         <button className="wmc-zoom-btn" onClick={zoomFit} title="适应">适配</button>
@@ -836,8 +846,8 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         <div className="wmc-region-badge">{region.name}</div>
       )}
 
-      {/* 小地图 */}
-      <div style={{ position: "absolute", right: 8, bottom: 8, background: "#0e1420", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4, padding: 2, zIndex: 10 }}>
+      {/* 小地图（右上角，缩放控件在其下） */}
+      <div style={{ position: "absolute", top: 16, right: 16, background: "#0e1420", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4, padding: 2, zIndex: 10 }}>
         <canvas ref={miniRef} style={{ width: 120, height: 120, display: "block" }} />
       </div>
     </div>
