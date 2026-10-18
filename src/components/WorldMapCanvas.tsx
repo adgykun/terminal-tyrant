@@ -53,6 +53,7 @@ interface WorldMapCanvasProps {
   onUnitInteract?: (unit: MapUnit) => void;   // 商队交易/NPC聊天（壳）
   onPassBattle?: (garrison: number) => void;   // 关隘守军战斗（修死按钮）
   onCamp?: () => void;                          // 扎营（修死按钮）
+  onSiege?: (action: "start" | "advance" | "assault" | "retreat", locId?: string) => void; // 攻城战
 }
 
 // === 工具 ===
@@ -65,7 +66,7 @@ function lerpPt(a: { x: number; y: number }, b: { x: number; y: number }, t: num
 }
 
 // === 主组件 ===
-export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp }: WorldMapCanvasProps) {
+export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp, onSiege }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -839,10 +840,36 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
               战斗 (守军 {(nearLoc as any).garrison_power})
             </button>
           )}
+          {state.vassal_of && !state.siege && (
+            <button className="wmc-btn wmc-btn-danger" onClick={() => onSiege?.("start", (nearLoc as any).id)}>
+              围城
+            </button>
+          )}
+          {state.siege && state.siege.location_id === (nearLoc as any)?.id && (
+            <>
+              <button className="wmc-btn" onClick={() => onSiege?.("advance")}>推进</button>
+              <button className="wmc-btn wmc-btn-danger" onClick={() => onSiege?.("assault")}>强攻</button>
+              <button className="wmc-btn wmc-btn-ghost" onClick={() => onSiege?.("retreat")}>撤退</button>
+            </>
+          )}
           <button className="wmc-btn wmc-btn-ghost" onClick={() => onCamp?.()}>扎营</button>
         </div>
       )}
 
+      {/* 围城进行中状态（常驻右上角） */}
+      {state.siege && (
+        <div style={{ position: "absolute", top: 30, right: 20, zIndex: 12, background: "rgba(10,8,4,0.88)", border: "1px solid var(--accent-gold-dark)", borderRadius: 8, padding: "8px 12px", fontSize: 11, lineHeight: 1.6, maxWidth: 200 }}>
+          <div style={{ color: "var(--accent-gold)", fontWeight: 600, marginBottom: 4 }}>⚔ 围城进行中</div>
+          <div>目标: {(byId(state.siege.location_id) as any)?.name ?? state.siege.location_id}</div>
+          <div>守军: {state.siege.garrison} 人</div>
+          <div>剩余: {state.siege.days_remaining} 天</div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+            <button className="wmc-btn" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => onSiege?.("advance")}>推进</button>
+            <button className="wmc-btn wmc-btn-danger" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => onSiege?.("assault")}>强攻</button>
+            <button className="wmc-btn wmc-btn-ghost" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => onSiege?.("retreat")}>撤退</button>
+          </div>
+        </div>
+      )}
       {/* 缩放控件（小地图下方，垂直堆叠） */}
       <div className="wmc-zoom-controls" style={{ position: "absolute", top: 146, right: 20, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
         <button className="wmc-zoom-btn" onClick={zoomIn} title="放大">+</button>
