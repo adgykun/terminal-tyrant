@@ -18,7 +18,7 @@ export default function App() {
   const game = useGame();
 
   if (!game.state) {
-    return <StartMenu onStart={game.startNewGame} onStartWithRegion={game.startNewGameWithRegion} onLoad={game.loadGame} hasSave={game.hasSave} />;
+    return <StartMenu onStart={game.startNewGame} onLoad={game.loadGame} hasSave={game.hasSave} />;
   }
 
   const gs = game.state;
