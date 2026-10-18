@@ -11,7 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { QuestPanel } from "./components/QuestPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
-import { move, resolve_combat_simple, move_region, advance_free_move } from "./core/engine";
+import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege } from "./core/engine";
 
 export default function App() {
   const game = useGame();
@@ -94,6 +94,14 @@ export default function App() {
                 s.add_log?.("你在野外扎营休整，士气 +20，粮食 -5。");
                 return { ok: true };
               });
+            }}
+            onSiege={(action, locId) => {
+              const fn =
+                action === "start" ? (s: any, id: string) => start_siege(s, id)
+                : action === "advance" ? (s: any) => siege_daily_progress(s)
+                : action === "assault" ? (s: any) => assault_siege(s)
+                : (s: any) => retreat_siege(s);
+              game.performAction(fn as any, locId as any);
             }}
           />
         );
