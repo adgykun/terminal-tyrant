@@ -15,10 +15,9 @@ import { Team } from "./Team";
 import { Health } from "./Health";
 import { Attack } from "./Attack";
 import { Target } from "./Target";
+import { MoveSpeed } from "./MoveSpeed";
 
 export class TargetingSystem extends System {
-  /** 行进速度。 */
-  private static readonly SPEED = 3.2;
   /** 与友军的最小间距（排斥半径）。 */
   private static readonly SEPARATION = 0.9;
   /** 每个敌人最多同时被几个我方锁定（侧翼上限）。 */
@@ -31,7 +30,7 @@ export class TargetingSystem extends System {
   }
 
   update(_dt: number): void {
-    const units = this.world.query(Position, Velocity, Team, Health, Attack, Target);
+    const units = this.world.query(Position, Velocity, Team, Health, Attack, Target, MoveSpeed);
 
     // 1. 清理失效目标
     for (const u of units) {
@@ -106,14 +105,15 @@ export class TargetingSystem extends System {
       const dx = tp.x - p.x;
       const dz = tp.z - p.z;
       const atk = u.getComponent(Attack)!;
+      const ms = u.getComponent(MoveSpeed)!.value;
       const inRange = Math.abs(dx) <= atk.range && Math.abs(dz) <= TargetingSystem.LOCK_TOL;
       if (inRange) {
         v.vx = 0;
         v.vz = 0;
       } else {
         const len = Math.hypot(dx, dz) || 1;
-        v.vx = (dx / len) * TargetingSystem.SPEED;
-        v.vz = (dz / len) * TargetingSystem.SPEED;
+        v.vx = (dx / len) * ms;
+        v.vz = (dz / len) * ms;
       }
     }
 
