@@ -48,7 +48,9 @@ export class RenderSystem extends System {
   }
 
   update(_dt: number): void {
+    const alive = new Set<number>();
     for (const e of this.world.query(Position, Team)) {
+      alive.add(e.id);
       const p = e.getComponent(Position)!;
       const t = e.getComponent(Team)!;
       let mesh = this.meshes.get(e.id);
@@ -61,6 +63,15 @@ export class RenderSystem extends System {
         this.meshes.set(e.id, mesh);
       }
       mesh.position.set(p.x, p.y, p.z);
+    }
+    // 实体被销毁 → 同步移除对应 Mesh
+    for (const [id, mesh] of this.meshes) {
+      if (!alive.has(id)) {
+        this.scene.remove(mesh);
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+        this.meshes.delete(id);
+      }
     }
     this.renderer.render(this.scene, this.camera);
   }
