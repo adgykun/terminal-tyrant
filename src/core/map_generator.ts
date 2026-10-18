@@ -13,6 +13,8 @@ import {
   TERRAIN_MOVE_COST,
 } from "./world_regions";
 import { GOODS } from "./data";
+import { BANNERLORD_TROOPS } from "./troops_bannerlord";
+import { CALRADIA_LOCATIONS } from "./calradia";
 
 /** 生成的地点类型 */
 export type LocationType = "village" | "town" | "wild" | "pass" | "port";
@@ -96,6 +98,37 @@ function weightedTerrain(config: RegionConfig): TerrainType {
     rand -= w;
   }
   return entries[0][0];
+}
+
+
+// === 骑砍2 文化兵种映射：区域文化 → 可招募兵种 ===
+const CULTURE_RECRUIT: Record<string, string[]> = {
+  // 城镇/港口：完整兵种链（初始兵 + 一级进阶）
+  empire: ["imperial_recruit", "imperial_infantryman", "imperial_archer"],
+  vlandia: ["vlandian_recruit", "vlandian_footman", "vlandian_levy_crossbowman"],
+  aserai: ["aserai_recruit", "aserai_tribesman"],
+  battania: ["battanian_volunteer", "battanian_clanwarrior", "battanian_woodrunner"],
+  khuzait: ["khuzait_nomad", "khuzait_footman", "khuzait_tribal_warrior"],
+  sturgia: ["sturgian_recruit", "sturgian_warrior", "sturgian_woodsman"],
+};
+// 村庄/野外：只招最基础兵
+const VILLAGE_RECRUIT: Record<string, string[]> = {
+  empire: ["imperial_recruit"],
+  vlandia: ["vlandian_recruit"],
+  aserai: ["aserai_recruit"],
+  battania: ["battanian_volunteer"],
+  khuzait: ["khuzait_nomad"],
+  sturgia: ["sturgian_recruit"],
+};
+// 区域 id → 文化（与 REGION_CULTURE 对齐）
+function cultureForRegion(region: any): string {
+  const id = region?.id || "";
+  const map: Record<string, string> = {
+    central_plains: "empire", persia: "aserai", nile_valley: "aserai", frankia: "vlandia",
+    mongol_steppe: "khuzait", arabia: "aserai", anatolia: "empire", indus_valley: "aserai",
+    sahel: "aserai", russia: "sturgia", iberia: "vlandia", scandinavia: "sturgia",
+  };
+  return map[id] || "empire";
 }
 
 function generateName(terrain: TerrainType, type: LocationType): string {
@@ -222,6 +255,10 @@ function computePrices(stock: Record<string, number>, goods: string[]): Record<s
  * @returns 生成的地点字典 { id: GeneratedLocation }
  */
 export function generate_region_map(region: RegionConfig): Record<string, GeneratedLocation> {
+  // === 卡拉迪亚模式：直接用骑砍2 官方定居点（真实坐标/名字/文化）===
+  if (region.id === "calradia") {
+    return generateCalradiaMap();
+  }
   const locations: Record<string, GeneratedLocation> = {};
   const locationList: GeneratedLocation[] = [];
   _loc_counter = 0;
@@ -269,7 +306,7 @@ export function generate_region_map(region: RegionConfig): Record<string, Genera
       tax_income: type === "town" ? randomInt(40, 80) : type === "village" ? randomInt(15, 30) : 0,
       neighbors: [],
       market,
-      barracks: type === "town" ? ["infantry", "archer"] : type === "village" ? ["peasant"] : [],
+      barracks: type === "town" || type === "port" ? (CULTURE_RECRUIT[cultureForRegion(region)] ?? ["infantry", "archer"]) : type === "village" ? (VILLAGE_RECRUIT[cultureForRegion(region)] ?? ["peasant"]) : [],
       tavern: type === "town" ? ["c1", "c3"] : undefined,
       arena: type === "town" && Math.random() < 0.5 ? true : undefined,
       slave_market: (type === "town" || type === "village") && Math.random() < 0.4 ? true : undefined,
@@ -293,7 +330,7 @@ export function generate_region_map(region: RegionConfig): Record<string, Genera
     }
 
     if (type === "port") {
-      loc.barracks = ["infantry", "archer"];
+      loc.barracks = CULTURE_RECRUIT[cultureForRegion(region)] ?? ["infantry", "archer"];
       loc.tavern = ["c1"];
       loc.facilities = ["winery"];
       loc.production.salt = randomInt(3, 8);
@@ -409,4 +446,67 @@ export function get_defense_bonus(loc: GeneratedLocation): number {
 /** 获取地形名称 */
 export function get_terrain_name(loc: GeneratedLocation): string {
   return TERRAIN_NAMES[loc.terrain_type] ?? "未知";
+}
+
+/** 卡拉迪亚：从官方数据构建 393 个定居点（城镇/城堡/村庄）。 */
+function generateCalradiaMap(): Record<string, GeneratedLocation> {
+  const locations: Record<string, GeneratedLocation> = {};
+  const list: GeneratedLocation[] = [];
+  // 文化 → 势力（卡拉迪亚 6 大军团）
+  const cultToFaction: Record<string, string> = {
+    empire: "rf1", vlandia: "rf2", aserai: "rf3",
+    battania: "rf4", khuzait: "rf5", sturgia: "rf6",
+  };
+  // 文化 → 兵营兵种
+  const CULTURE_RECRUIT_C: Record<string, string[]> = {
+    empire: ["imperial_recruit", "imperial_infantryman", "imperial_archer"],
+    vlandia: ["vlandian_recruit", "vlandian_footman", "vlandian_levy_crossbowman"],
+    aserai: ["aserai_recruit", "aserai_tribesman"],
+    battania: ["battanian_volunteer", "battanian_clanwarrior", "battanian_woodrunner"],
+    khuzait: ["khuzait_nomad", "khuzait_footman", "khuzait_tribal_warrior"],
+    sturgia: ["sturgian_recruit", "sturgian_warrior", "sturgian_woodsman"],
+  };
+  for (const loc of CALRADIA_LOCATIONS) {
+    const culture = loc.culture;
+    const factionId = cultToFaction[culture] || "rf1";
+    const isTown = loc.type === "town";
+    const isCastle = loc.type === "castle";
+    const gl: GeneratedLocation = {
+      id: loc.id,
+      name: loc.name,
+      type: isTown ? "town" : (isCastle ? "pass" : "village"),
+      terrain_type: "plain",
+      x: loc.x,
+      y: loc.y,
+      faction_id: factionId,
+      owner: "neutral",
+      tax_income: isTown ? 60 : (isCastle ? 25 : 18),
+      neighbors: [],
+      market: {},
+      barracks: isTown ? (CULTURE_RECRUIT_C[culture] ?? ["infantry", "archer"]) : (["peasant"]),
+      tavern: isTown ? ["c1", "c3"] : undefined,
+      arena: isTown && Math.random() < 0.5,
+      slave_market: isTown && Math.random() < 0.4,
+      facilities: isTown ? ["forge"] : undefined,
+      active_quests: [],
+      production: { wood: isTown ? 3 : 1 },
+      consumption: { wood: 1 },
+      stock: { wood: 10 },
+      ecology: { forest_coverage: 50, soil_fertility: 50, water_quality: 50 },
+      defense_bonus: isCastle ? 1.5 : undefined,
+      garrison_power: isCastle ? 20 : undefined,
+      is_port: isTown && (loc.id.includes("port") || loc.name.toLowerCase().includes("port") || loc.name.toLowerCase().includes("sea")),
+    };
+    locations[loc.id] = gl;
+    list.push(gl);
+  }
+  // 邻居：最近 3 个定居点
+  for (const loc of list) {
+    const sorted = list
+      .filter(l => l.id !== loc.id)
+      .map(l => ({ l, d: Math.hypot(l.x - loc.x, l.y - loc.y) }))
+      .sort((a, b) => a.d - b.d);
+    loc.neighbors = sorted.slice(0, 3).map(x => x.l.id);
+  }
+  return locations;
 }
