@@ -6,6 +6,7 @@ export interface MapUnit {
   x: number;
   y: number;
   faction: string;      // 势力 id（army）或 'caravan'/'bandit'/'npc'
+  factionKey?: string;  // army: 八王国主键
   type: "army" | "caravan" | "bandit" | "npc";
   targetX: number;
   targetY: number;
@@ -17,6 +18,21 @@ export interface MapUnit {
 }
 
 // 势力名 → hex（与 FACTION_COLORS 对齐）
+// 八王国初始关系（<0 为敌对，用于 AI 军团围城目标选择）
+const KINGDOM_REL: Record<string, Record<string, number>> = {
+  empire_n: { empire_w: -50, empire_s: 10, sturgia: -50, vlandia: 20, khuzait: 0, aserai: 10, battania: 20 },
+  empire_w: { empire_n: -50, empire_s: -50, sturgia: 20, vlandia: -50, khuzait: 0, aserai: 20, battania: 0 },
+  empire_s: { empire_n: 10, empire_w: -50, sturgia: 0, vlandia: 20, khuzait: -50, aserai: -50, battania: 10 },
+  sturgia: { empire_n: -50, empire_w: 20, empire_s: 0, vlandia: 0, khuzait: -50, aserai: 0, battania: 20 },
+  aserai: { empire_n: 10, empire_w: 20, empire_s: -50, sturgia: 0, vlandia: 0, khuzait: -50, battania: 0 },
+  vlandia: { empire_n: 20, empire_w: -50, empire_s: 20, sturgia: 0, aserai: 0, khuzait: 0, battania: -50 },
+  battania: { empire_n: 20, empire_w: 0, empire_s: 10, sturgia: 20, aserai: 0, khuzait: 0, vlandia: -50 },
+  khuzait: { empire_n: 0, empire_w: 0, empire_s: -50, sturgia: -50, aserai: -50, vlandia: 0, battania: 0 },
+};
+// 卡拉迪亚 rf 主键 → 八王国主键
+const RF_TO_KINGDOM: Record<string, string> = {
+  rf1: "empire_n", rf2: "vlandia", rf3: "aserai", rf4: "battania", rf5: "khuzait", rf6: "sturgia",
+};
 const FACTION_HEX: Record<string, string> = {
   rf1: "#4a90d9", rf2: "#5cb85c", rf3: "#c0392b", rf4: "#a855f7",
   f1: "#4a90d9", f2: "#5cb85c", f3: "#c0392b", f4: "#a855f7",
@@ -104,10 +120,12 @@ export function generateMapUnits(
       const cult = cultureOf(region, f.id);
       const comp = makeTroopComp(cult, rnd);
       const powerSum = Object.entries(comp).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * cnt, 0);
+      const factionKey = RF_TO_KINGDOM[f.id] || f.id;
       units.push({
         id: `army_${fi}_${i}_${seed}`,
         x: s.x + (rnd() * 4 - 2), y: s.y + (rnd() * 4 - 2),
         faction: f.id, type: "army",
+        factionKey, // 八王国主键（用于敌我判断）
         targetX: 0, targetY: 0, speed: 2.2 + rnd() * 1.2,
         name: `${CULTURE_ARMY_PREFIX[cult] || f.name || "军队"}(${powerSum})`, color: mapHex(f.id, f.name), dwell: 0,
         troops: comp,
@@ -149,7 +167,25 @@ export function generateMapUnits(
   return units;
 }
 
+function enemyLocationsFor(u: MapUnit, usable: any[]): any[] {
+  if (u.type !== "army" || !u.factionKey) return [];
+  const rel = KINGDOM_REL[u.factionKey] || {};
+  return usable.filter((l: any) => {
+    const lk = RF_TO_KINGDOM[l.faction_id] || l.faction_id;
+    return lk && lk !== u.factionKey && (rel[lk] ?? 0) < 0;
+  });
+}
 function assignTarget(u: MapUnit, usable: any[], rnd: () => number) {
+  // 军团：优先敌国地点（围城前线），50% 概率直奔敌城
+  if (u.type === "army" && u.factionKey) {
+    const enemies = enemyLocationsFor(u, usable);
+    if (enemies.length > 0 && rnd() < 0.5) {
+      const s = enemies[Math.floor(rnd() * enemies.length)];
+      u.targetX = s.x + (rnd() * 6 - 3);
+      u.targetY = s.y + (rnd() * 6 - 3);
+      return;
+    }
+  }
   // 80% 去某个地点，20% 去随机野外点
   if (rnd() < 0.8 && usable.length > 0) {
     const s = usable[Math.floor(rnd() * usable.length)];
@@ -162,13 +198,39 @@ function assignTarget(u: MapUnit, usable: any[], rnd: () => number) {
   u.dwell = 0;
 }
 
-// 每帧推进（就地修改 units，返回是否需要停止渲染优化用不到）
+// 军团遭遇敌国军团：近距则"交战"（弱方溃散移出视野，强方留驻），返回战斗描述
+function resolveArmyClashes(units: MapUnit[]): string[] {
+  const msgs: string[] = [];
+  const armies = units.filter((u) => u.type === "army" && u.factionKey);
+  for (let i = 0; i < armies.length; i++) {
+    for (let j = i + 1; j < armies.length; j++) {
+      const a = armies[i], b = armies[j];
+      if (!a.factionKey || !b.factionKey) continue;
+      if (a.factionKey === b.factionKey) continue;
+      const relA = KINGDOM_REL[a.factionKey]?.[b.factionKey] ?? 0;
+      const relB = KINGDOM_REL[b.factionKey]?.[a.factionKey] ?? 0;
+      if (relA >= 0 || relB >= 0) continue;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 0.9) continue;
+      const pa = Object.entries(a.troops || {}).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number), 0);
+      const pb = Object.entries(b.troops || {}).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number), 0);
+      const loser = pa >= pb ? b : a;
+      const winner = loser === a ? b : a;
+      loser.x = 999; loser.y = 999; // 视作溃散
+      winner.dwell = 4; // 战后停留
+      msgs.push(`${loser.name} 被 ${winner.name} 击溃！`);
+    }
+  }
+  return msgs;
+}
+// 每帧推进（就地修改 units，返回军团战斗消息）
 export function advanceUnits(
   units: MapUnit[],
   dt: number,
   usable: any[],
   seed: number
-) {
+): string[] {
+  const clashMsgs = resolveArmyClashes(units);
   const rnd = Math.random;
   for (const u of units) {
     if (u.dwell > 0) {
@@ -187,4 +249,5 @@ export function advanceUnits(
     u.x += (dx / d) * step;
     u.y += (dy / d) * step;
   }
+  return clashMsgs;
 }
