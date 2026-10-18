@@ -8,7 +8,7 @@ import {
 import { TERRAIN_COLORS, get_region } from "../core/world_regions";
 import type { GameState } from "../core/state";
 import { generateTerrainCanvas, type TerrainLayer } from "../core/terrain_noise";
-import { generateMapUnits, advanceUnits, type MapUnit } from "../core/map_units";
+import { generateMapUnits, advanceUnits, RF_TO_KINGDOM, KINGDOM_REL, type MapUnit } from "../core/map_units";
 import { BANNERLORD_TROOPS } from "../core/troops_bannerlord";
 
 function troopName(id: string): string {
@@ -54,6 +54,8 @@ interface WorldMapCanvasProps {
   onPassBattle?: (garrison: number) => void;   // 关隘守军战斗（修死按钮）
   onCamp?: () => void;                          // 扎营（修死按钮）
   onSiege?: (action: "start" | "advance" | "assault" | "retreat", locId?: string) => void; // 攻城战
+  onJoinArmy?: (armyId: string) => void;        // 加入王国军团
+  onLeaveArmy?: () => void;                     // 脱离王国军团
 }
 
 // === 工具 ===
@@ -66,7 +68,7 @@ function lerpPt(a: { x: number; y: number }, b: { x: number; y: number }, t: num
 }
 
 // === 主组件 ===
-export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp, onSiege }: WorldMapCanvasProps) {
+export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp, onSiege, onJoinArmy, onLeaveArmy }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -262,6 +264,24 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         fr.distAcc = 0;
       }
 
+      // 跟随军团：joined_army 时玩家位置跟随该军团移动（行军/围城）
+      if (state.joined_army) {
+        const joined = unitsRef.current.find((u) => u.id === state.joined_army);
+        if (joined) {
+          playerPosRef.current = { x: joined.x, y: joined.y };
+          camRef.current.x = joined.x;
+          camRef.current.y = joined.y;
+          // 军团行动中（行军到敌城/围城），玩家视角自动跟随
+          if (joined.dwell > 0 && joined.x !== 999 && joined.y !== 999) {
+            // 军团到点停留：视为围城/休整
+            setClashToast(["你的军团正在行动…"]);
+          }
+        } else {
+          // 军团已溃散/消失，自动脱离
+          onLeaveArmy?.();
+        }
+      }
+
       // 清除 + blit 地形
       ctx.clearRect(0, 0, W, H);
       if (offscreenRef.current) ctx.drawImage(offscreenRef.current, 0, 0);
@@ -333,6 +353,42 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         const pxPerWorldUnit = zoom * (window.devicePixelRatio || 1);
         const TARGET_ICON_PX = 14; // 屏幕目标字号（CSS px），移动端可到 16
         const worldFontSize = TARGET_ICON_PX / pxPerWorldUnit;
+        // 军团围攻圈可视化：敌方领地旁若有多支敌军军团聚集，画围攻圈
+        const armyCounts: Record<string, number> = {};
+        for (const u of unitsRef.current) {
+          if (u.type !== "army") continue;
+          // 找到最近地点
+          let bestLoc: any = null, bestD = 3.0;
+          for (const loc of locations as any[]) {
+            const d = Math.hypot(u.x - (loc as any).x, u.y - (loc as any).y);
+            if (d < bestD) { bestD = d; bestLoc = loc; }
+          }
+          if (bestLoc) {
+            const k = RF_TO_KINGDOM[(bestLoc as any).faction_id] || (bestLoc as any).faction_id;
+            const uK = u.factionKey;
+            if (uK && k && uK !== k) {
+              const rel = KINGDOM_REL[uK]?.[k] ?? 0;
+              if (rel < 0) armyCounts[(bestLoc as any).id] = (armyCounts[(bestLoc as any).id] ?? 0) + 1;
+            }
+          }
+        }
+        for (const loc of locations as any[]) {
+          const cnt = armyCounts[(loc as any).id];
+          if (cnt && cnt >= 2) {
+            const lx = (loc as any).x, ly = (loc as any).y;
+            ctx.beginPath();
+            ctx.arc(lx, ly, 2.2 + Math.sin(Date.now() / 400) * 0.3, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(255,120,40,0.6)";
+            ctx.lineWidth = 0.12;
+            ctx.setLineDash([0.3, 0.25]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.font = "0.7px sans-serif";
+            ctx.fillStyle = "#ff9040";
+            ctx.textAlign = "center";
+            ctx.fillText(`⚔ ${cnt} 军围城`, lx, ly - 2.4);
+          }
+        }
         for (const u of unitsRef.current) {
           const uisSel = selUnitRef.current?.id === u.id;
           // 类型图标（小三角/方块区分）+ 势力色环 + 名字
@@ -828,7 +884,15 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
               <button className="wmc-btn wmc-btn-danger" onClick={() => onUnitCombat?.(10, `遭遇 ${selUnit.name}`)}>交战</button>
             )}
             {selUnit.type === "army" && (
-              <button className="wmc-btn" onClick={() => onUnitCombat?.(15, `与 ${selUnit.name} 交战`)}>交战</button>
+              <>
+                <button className="wmc-btn" onClick={() => onUnitCombat?.(15, `与 ${selUnit.name} 交战`)}>交战</button>
+                {state.vassal_of && selUnit.factionKey === state.vassal_of && !state.joined_army && (
+                  <button className="wmc-btn" onClick={() => onJoinArmy?.(selUnit.id)}>加入军团</button>
+                )}
+                {state.joined_army === selUnit.id && (
+                  <button className="wmc-btn wmc-btn-ghost" onClick={() => onLeaveArmy?.()}>脱离军团</button>
+                )}
+              </>
             )}
             {(selUnit.type === "caravan" || selUnit.type === "npc") && (
               <button className="wmc-btn" onClick={() => onUnitInteract?.(selUnit)}>
