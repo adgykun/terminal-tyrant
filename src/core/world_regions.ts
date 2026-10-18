@@ -523,7 +523,7 @@ export function get_region(id: string): RegionConfig | undefined {
       },
       ecology_base: { forest_coverage: 50, soil_fertility: 50, water_quality: 50 },
       factions: [
-        { id: "rf1", name: "帝国", color: "purple", currency_id: "gold", personality: "honorable", start_renown: 0 },
+        { id: "rf1", name: "北帝国", color: "purple", currency_id: "gold", personality: "honorable", start_renown: 0 },
         { id: "rf2", name: "瓦兰迪亚", color: "blue", currency_id: "gold", personality: "generous", start_renown: 0 },
         { id: "rf3", name: "阿塞莱", color: "red", currency_id: "gold", personality: "treacherous", start_renown: 0 },
         { id: "rf4", name: "巴塔尼亚", color: "green", currency_id: "gold", personality: "honorable", start_renown: 0 },
