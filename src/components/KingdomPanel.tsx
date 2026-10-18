@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { GameState } from "../core/state";
 import { LOCATIONS, FACTIONS, POLICIES, COMPANIONS } from "../core/data";
-import { declare_kingdom, assign_lord, set_policy, conquer_location } from "../core/engine";
+import { declare_kingdom, assign_lord, set_policy, conquer_location, swear_fealty, renounce_fealty } from "../core/engine";
 import { Crown, Castle, Flag, Settings } from "lucide-react";
 
 interface KingdomPanelProps {
@@ -15,23 +15,71 @@ export function KingdomPanel({ state, performAction }: KingdomPanelProps) {
 
   if (!state.is_king && !showCreate) {
     const canDeclare = state.renown >= 500 && state.fiefs.length >= 1;
+    const KINGDOM_IDS = ["empire_n", "empire_w", "empire_s", "sturgia", "aserai", "vlandia", "battania", "khuzait"];
+    const vassalInfo = state.vassal_of ? FACTIONS[state.vassal_of] : null;
     return (
-      <div className="panel">
-        <div className="panel-title"><Crown size={22} /> 建国</div>
-        <p className="text-sm text-secondary mb-12">
-          声望达到 500 且拥有至少 1 块封地方可宣告建国。
-        </p>
-        <div className="text-sm mb-8">
-          当前声望: <span className={state.renown >= 500 ? "text-green" : "text-red"}>{state.renown} / 500</span><br />
-          当前封地: <span className={state.fiefs.length >= 1 ? "text-green" : "text-red"}>{state.fiefs.length} / 1</span>
+      <div>
+        <div className="panel">
+          <div className="panel-title"><Flag size={22} /> 效忠王国</div>
+          {vassalInfo ? (
+            <div className="flex-col gap-8">
+              <div className="text-sm">
+                当前效忠: <span className="text-gold text-bold">{vassalInfo.name}</span>
+              </div>
+              <div className="text-sm text-secondary">
+                作为封臣攻击该国敌国部队将获得声望，攻击友军则会关系下降。
+              </div>
+              <button className="danger" onClick={() => performAction(renounce_fealty)}>
+                叛变脱离
+              </button>
+            </div>
+          ) : (
+            <div className="flex-col gap-8">
+              <p className="text-sm text-secondary mb-8">
+                向八王国之一宣誓效忠，成为其封臣，参与王国战争。
+              </p>
+              {KINGDOM_IDS.map(kid => {
+                const f = FACTIONS[kid];
+                if (!f) return null;
+                const rel = state.faction_relations?.[kid] ?? 0;
+                return (
+                  <div key={kid} className="list-item">
+                    <span className="text-bold" style={{ color: f.color === "blue" ? "var(--faction-blue)" : f.color === "green" ? "var(--faction-green)" : f.color === "red" ? "var(--faction-red)" : f.color === "brown" ? "var(--faction-brown)" : "var(--faction-purple)" }}>{f.name}</span>
+                    <span className="text-sm text-muted">好感 {rel > 0 ? `+${rel}` : rel}</span>
+                    <button
+                      className={rel >= 100 ? "primary" : ""}
+                      disabled={state.renown < 100}
+                      onClick={() => performAction(swear_fealty, kid)}
+                    >
+                      效忠
+                    </button>
+                  </div>
+                );
+              })}
+              {state.renown < 100 && (
+                <div className="text-sm text-red">声望达到 100 方可效忠，当前 {state.renown}</div>
+              )}
+            </div>
+          )}
         </div>
-        <button
-          className="primary"
-          disabled={!canDeclare}
-          onClick={() => setShowCreate(true)}
-        >
-          宣告建国
-        </button>
+        <div className="panel">
+          <div className="panel-title"><Crown size={22} /> 建国</div>
+          <p className="text-sm text-secondary mb-12">
+            声望达到 500 且拥有至少 1 块封地方可宣告建国。
+          </p>
+          <div className="text-sm mb-8">
+            当前声望: <span className={state.renown >= 500 ? "text-green" : "text-red"}>{state.renown} / 500</span><br />
+            当前封地: <span className={state.fiefs.length >= 1 ? "text-green" : "text-red"}>{state.fiefs.length} / 1</span>
+          </div>
+          <button
+            className="primary"
+            disabled={!canDeclare || !!state.vassal_of}
+            onClick={() => setShowCreate(true)}
+          >
+            宣告建国
+          </button>
+          {state.vassal_of && <div className="text-sm text-muted mt-8">已效忠王国，需先叛变才能建国。</div>}
+        </div>
       </div>
     );
   }
