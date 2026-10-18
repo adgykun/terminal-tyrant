@@ -1,3 +1,4 @@
+import { CALRADIA_REGION } from "./calradia";
 /**
  * 亚欧非大陆区域定义模块。
  * 每个区域对应真实世界的一个地理板块，包含地形分布、势力、货币和生态配置。
@@ -505,6 +506,35 @@ export const WORLD_REGIONS: RegionConfig[] = [
 
 /** 获取区域配置 */
 export function get_region(id: string): RegionConfig | undefined {
+  if (id === "calradia") {
+    return {
+      id: CALRADIA_REGION.id,
+      name: CALRADIA_REGION.name,
+      lore: CALRADIA_REGION.lore,
+      map_width: CALRADIA_REGION.map_width,
+      map_height: CALRADIA_REGION.map_height,
+      difficulty: 3,
+      real_world: "卡拉迪亚大陆",
+      description: "旧帝国疆域，六方势力争霸的卡拉迪亚大陆。",
+      terrain: {
+        weights: { plain: 0.4, forest: 0.2, mountain: 0.15, river: 0.1, desert: 0.05, coast: 0.1 },
+        rivers: [],
+        coast_directions: ["north", "west", "south"],
+      },
+      ecology_base: { forest_coverage: 50, soil_fertility: 50, water_quality: 50 },
+      factions: [
+        { id: "rf1", name: "帝国", color: "purple", currency_id: "gold", personality: "honorable", start_renown: 0 },
+        { id: "rf2", name: "瓦兰迪亚", color: "blue", currency_id: "gold", personality: "generous", start_renown: 0 },
+        { id: "rf3", name: "阿塞莱", color: "red", currency_id: "gold", personality: "treacherous", start_renown: 0 },
+        { id: "rf4", name: "巴塔尼亚", color: "green", currency_id: "gold", personality: "honorable", start_renown: 0 },
+        { id: "rf5", name: "库赛特", color: "brown", currency_id: "gold", personality: "stingy", start_renown: 0 },
+        { id: "rf6", name: "斯特吉亚", color: "cyan", currency_id: "gold", personality: "generous", start_renown: 0 },
+      ],
+      currencies: [{ id: "gold", name: "金币", symbol: "金", base_rate: 1.0 }],
+      specialty_goods: ["wood", "iron"],
+      pass_count: 8,
+    } as RegionConfig;
+  }
   return WORLD_REGIONS.find(r => r.id === id);
 }
 
