@@ -1,5 +1,5 @@
 import { GameView } from "../hooks/useGame";
-import { Map, Home, User, Users, Backpack, ScrollText, Crown, LogOut, Volume2, VolumeX } from "lucide-react";
+import { Map, Home, User, Users, Backpack, ScrollText, Crown, LogOut, Volume2, VolumeX, Swords } from "lucide-react";
 import { GameState } from "../core/state";
 
 interface SidebarProps {
@@ -50,6 +50,7 @@ export function Sidebar({ view, setView, state, onQuit, voiceEnabled, onToggleVo
       <NavItem icon={<User size={18} />} label="角色" active={view === "character"} onClick={() => setView("character")} />
       <NavItem icon={<Users size={18} />} label="队伍" active={view === "party"} onClick={() => setView("party")} />
       <NavItem icon={<Backpack size={18} />} label="背包" active={view === "inventory"} onClick={() => setView("inventory")} />
+      <NavItem icon={<Swords size={18} />} label="3D战场" active={view === "battle"} onClick={() => setView("battle")} />
       <NavItem icon={<ScrollText size={18} />} label="任务" active={view === "quests"} onClick={() => setView("quests")} />
       {state.is_king && (
         <NavItem icon={<Crown size={18} />} label="王国" active={view === "kingdom"} onClick={() => setView("kingdom")} />
