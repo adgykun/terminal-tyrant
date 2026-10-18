@@ -228,7 +228,9 @@ export function add_log(state: any, event_text: string): void {
 
 /** 每日结算：更新势力之间的动态关系。 */
 export function update_faction_relations(state: any): void {
-    const f_ids = Object.keys(FACTIONS);
+    // 只让八王国主键参与外交（排除 rf1-rf6 别名）
+    const KINGDOM_IDS = ["empire_n", "empire_w", "empire_s", "sturgia", "aserai", "vlandia", "battania", "khuzait"];
+    const f_ids = KINGDOM_IDS.filter((id: string) => id in FACTIONS);
     if (f_ids.length < 2) {
         return;
     }
