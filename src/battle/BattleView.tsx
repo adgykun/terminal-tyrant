@@ -27,6 +27,8 @@ import { MovementSystem } from "./MovementSystem";
 import { TargetingSystem } from "./TargetingSystem";
 import { CombatSystem } from "./CombatSystem";
 import { RenderSystem } from "./RenderSystem";
+import { PlayerControl } from "./PlayerControl";
+import { PlayerInputSystem } from "./PlayerInputSystem";
 
 /** 战斗结算数据。 */
 export interface BattleEndResult {
@@ -79,15 +81,19 @@ export function BattleView({
 
     const world = new World();
     worldRef.current = world;
+    const playerInputSys = new PlayerInputSystem();
     const targetingSys = new TargetingSystem();
     const moveSys = new MovementSystem();
     const combatSys = new CombatSystem();
     const renderSys = new RenderSystem(mount);
+    // 执行顺序：玩家输入 → AI 寻敌走位 → 位移 → 交战 → 渲染
+    world.addSystem(playerInputSys);
     world.addSystem(targetingSys);
     world.addSystem(moveSys);
     world.addSystem(combatSys);
     world.addSystem(renderSys);
-
+    // 玩家攻击命中 → 镜头震动（跨系统回调：CombatSystem 出手 → RenderSystem shake）
+    combatSys.onPlayerAttack = () => renderSys.addShake();
     // 生成战场：真实部队（每个实体按兵种规格差异化，并记录兵种 id）
     const spawnArmy = (
       side: number,
@@ -114,15 +120,28 @@ export function BattleView({
     };
     spawnArmy(0, 0x4a90ff, 8, pList);
     spawnArmy(1, 0xff5050, -8, eList);
-
+    // 玩家英雄实体：蓝色、体积 1.5 倍、高血量高攻击，带 PlayerControl
+    const player = world.createEntity();
+    player
+      .addComponent(new Position(8, 0.9, 0))
+      .addComponent(new Velocity(0, 0, 0))
+      .addComponent(new Team(0, 0x44ccff))
+      .addComponent(new Health(300))
+      .addComponent(new Attack(20, 1.6, 0.8))
+      .addComponent(new Target(null))
+      .addComponent(new Visual(0.75, 1.65))
+      .addComponent(new MoveSpeed(4.2))
+      .addComponent(new PlayerControl())
+      .addComponent(new TroopType("player"));
+    playerInputSys.setPlayer(player);
     world.start();
-
     return () => {
       world.stop();
       world.removeSystem(renderSys);
       world.removeSystem(combatSys);
       world.removeSystem(moveSys);
       world.removeSystem(targetingSys);
+      world.removeSystem(playerInputSys);
       worldRef.current = null;
       endedRef.current = false;
     };
@@ -137,6 +156,7 @@ export function BattleView({
 
       let p = 0;
       let e = 0;
+      let playerAlive = false;
       const pSurvivors: Record<string, number> = {};
       const pCasualties: Record<string, number> = {};
       const initialP = new Map<string, number>();
@@ -149,6 +169,10 @@ export function BattleView({
         const tt = ent.getComponent(TroopType);
         const id = tt?.id ?? "unknown";
         if (!t) return;
+        // 玩家英雄实体存活判定
+        if (ent.hasComponent(PlayerControl) && ent.getComponent(Health)?.alive) {
+          playerAlive = true;
+        }
         if (t.side === 0) {
           p++;
           pSurvivors[id] = (pSurvivors[id] ?? 0) + 1;
@@ -166,10 +190,15 @@ export function BattleView({
 
       setStats({ p, e });
 
-      // 战斗结束判定：任一方归零，且未触发过
-      if ((p <= 0 || e <= 0) && !endedRef.current) {
+      // 战斗结束判定：
+      //  - 敌方全灭且玩家存活 → 胜利；
+      //  - 玩家英雄阵亡（即使己方还有兵）→ 失败；
+      //  - 己方部队全灭（玩家未计入 troops）→ 失败。
+      const enemyDead = e <= 0;
+      const alliesDead = p <= 0 && !playerAlive;
+      if ((enemyDead || !playerAlive || alliesDead) && !endedRef.current) {
         endedRef.current = true;
-        const won = e <= 0;
+        const won = enemyDead && playerAlive;
         onBattleEndRef.current?.({
           won,
           casualties: pCasualties,
