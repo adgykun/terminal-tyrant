@@ -56,12 +56,18 @@ export function PartyPanel({ state, performAction }: PartyPanelProps) {
               </div>
               <div className="flex-col gap-4" style={{ alignItems: "flex-end" }}>
                 <span className="text-bold text-gold">x{count}</span>
-                <div className="flex-row gap-4">
-                  {unit.upgrade_to && (
+                <div className="flex-col gap-4" style={{ alignItems: "flex-end" }}>
+                  {unit.upgrade_targets && unit.upgrade_targets.length > 0 ? (
+                    unit.upgrade_targets.map((tid: string) => (
+                      <button key={tid} style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => performAction(upgrade_unit, uId, 1, tid)}>
+                        升级 → {UNITS[tid]?.name ?? tid} ({UNITS[uId]?.upgrade_cost ?? 0}金)
+                      </button>
+                    ))
+                  ) : unit.upgrade_to ? (
                     <button style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => performAction(upgrade_unit, uId, 1)}>
                       升级 → {UNITS[unit.upgrade_to]?.name}
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
