@@ -85,8 +85,8 @@ export function StartMenu({ onStart, onStartWithRegion, onLoad, hasSave }: Start
           <button onClick={() => setStage("main")}>
             <ChevronLeft size={16} style={{ display: "inline", marginRight: "4px" }} />返回
           </button>
-          <button className="primary" onClick={() => setStage("region")} disabled={remaining !== 0 || str < 1 || int < 1 || charm < 1}>
-            选择区域 <ChevronRight size={16} style={{ display: "inline", marginLeft: "4px" }} />
+          <button className="primary" onClick={() => handleStart()} disabled={remaining !== 0 || str < 1 || int < 1 || charm < 1}>
+            开始冒险 <ChevronRight size={16} style={{ display: "inline", marginLeft: "4px" }} />
           </button>
         </div>
       </div>
