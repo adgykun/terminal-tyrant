@@ -1392,6 +1392,74 @@ export function get_vassal_info(state: any): { kingdom_id: string; name: string;
     return { kingdom_id: state.vassal_of, name: f.name, color: f.color };
 }
 /** 建国称王逻辑。 */
+/** 国王：对某王国宣战（好感强制降到负）。 */
+export function declare_war(state: any, kingdom_id: string): string {
+    if (!state.is_king) {
+        return `只有国王才能宣战！当前你是 ${state.vassal_of ? FACTIONS[state.vassal_of]?.name ?? "封臣" : "自由人"}。`;
+    }
+    if (kingdom_id === "player_kingdom") {
+        return `不能对自己宣战！`;
+    }
+    const f = FACTIONS[kingdom_id];
+    if (!f) return `未知王国 '${kingdom_id}'`;
+    const rel = state.faction_relations?.[kingdom_id] ?? 0;
+    if (rel < 0) {
+        return `你已与 ${f.name} 处于战争状态（好感 ${rel}）。`;
+    }
+    state.faction_relations[kingdom_id] = -50;
+    const msg = `你对 ${f.name} 宣战！两国关系恶化至 -50。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 国王：与某王国停战（好感拉回 0）。 */
+export function make_peace(state: any, kingdom_id: string): string {
+    if (!state.is_king) {
+        return `只有国王才能停战！`;
+    }
+    const f = FACTIONS[kingdom_id];
+    if (!f) return `未知王国 '${kingdom_id}'`;
+    const rel = state.faction_relations?.[kingdom_id] ?? 0;
+    if (rel >= 0) {
+        return `你与 ${f.name} 并未交战。`;
+    }
+    state.faction_relations[kingdom_id] = 0;
+    const msg = `你与 ${f.name} 达成停战，两国关系恢复至 0。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 封臣：响应王国号召，与敌国交战一场（消耗体力，赢声望输关系）。 */
+export function respond_to_call(state: any, kingdom_id: string): string {
+    if (!state.vassal_of) {
+        return `只有封臣才能响应王国号召！`;
+    }
+    if (kingdom_id === state.vassal_of) {
+        return `不能攻击自己的王国！`;
+    }
+    const f = FACTIONS[kingdom_id];
+    if (!f) return `未知王国 '${kingdom_id}'`;
+    const rel = FACTIONS[state.vassal_of]?.relations?.[kingdom_id] ?? 0;
+    if (rel >= 0) {
+        return `${FACTIONS[state.vassal_of]?.name} 与 ${f.name} 并非敌国（好感 ${rel}），没有号召。`;
+    }
+    const myPower = calculate_army_power(state.troops);
+    const enemyPower = Math.round(myPower * (0.7 + Math.random() * 0.6));
+    const win = Math.random() < 0.5 + (myPower - enemyPower) / 200;
+    if (win) {
+        state.renown = (state.renown ?? 0) + 15;
+        state.faction_relations[kingdom_id] = (state.faction_relations[kingdom_id] ?? 0) - 10;
+        const msg = `你响应号召迎战 ${f.name} 军队并取胜！声望 +15，${f.name} 好感 -10。`;
+        state.add_log(msg);
+        return msg;
+    } else {
+        state.renown = Math.max(0, (state.renown ?? 0) - 10);
+        const loss = Math.min(Math.floor(myPower * 0.15), 30);
+        state.troops = apply_casualties(state.troops, loss);
+        const msg = `你响应号召与 ${f.name} 交战失利，损失 ${loss} 兵力，声望 -10。`;
+        state.add_log(msg);
+        return msg;
+    }
+}
+/** 国王：对某王国宣战（好感强制降到负）。 */
 export function declare_kingdom(state: any, kingdom_name: string): string {
     if (state.is_king) {
         return `你已经建立了王国 [${state.kingdom_name}]，无需重复建国！`;
