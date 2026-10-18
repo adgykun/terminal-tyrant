@@ -12,6 +12,7 @@ import {
     COMPANIONS,
     EQUIPMENT,
     FACTIONS,
+    RF_TO_KINGDOM,
     QUEST_TEMPLATES,
     POLICIES,
     FISHING_GEAR,
@@ -854,10 +855,27 @@ export function resolve_combat_simple(state: any, enemy_power: number, choice: s
         const loc_info = get_current_location(state) ?? {};
         const faction_id = loc_info.faction_id;
         if (faction_id && faction_id in state.faction_relations) {
-            state.faction_relations[faction_id] -= 10;
             const faction_name = FACTIONS[faction_id]?.name ?? faction_id;
-            const faction_notice = `你攻击了 ${faction_name} 的部队，关系下降。`;
-            message += ` (${faction_notice})`;
+            // 封臣参战：攻击王国敌国 = 功勋，攻击友军 = 掉好感
+            let kingdomId: string | null = null;
+            if (faction_id in RF_TO_KINGDOM) kingdomId = RF_TO_KINGDOM[faction_id];
+            else if (faction_id.startsWith("empire_") || ["sturgia","aserai","vlandia","battania","khuzait"].includes(faction_id)) kingdomId = faction_id;
+            if (state.vassal_of && kingdomId) {
+                const rel = FACTIONS[state.vassal_of]?.relations?.[kingdomId] ?? 0;
+                if (rel < 0) {
+                    state.renown = (state.renown ?? 0) + 5;
+                    const honor_notice = `你攻击了敌国 ${faction_name} 的部队，为王国建功！声望 +5。`;
+                    message += ` (${honor_notice})`;
+                } else {
+                    state.faction_relations[faction_id] -= 10;
+                    const friend_notice = `你攻击了友军 ${faction_name} 的部队，关系下降！`;
+                    message += ` (${friend_notice})`;
+                }
+            } else {
+                state.faction_relations[faction_id] -= 10;
+                const faction_notice = `你攻击了 ${faction_name} 的部队，关系下降。`;
+                message += ` (${faction_notice})`;
+            }
         }
 
         state.add_log(`选择主动进攻。${message}`);
@@ -929,10 +947,27 @@ export function resolve_combat_simple(state: any, enemy_power: number, choice: s
         const loc_info = get_current_location(state) ?? {};
         const faction_id = loc_info.faction_id;
         if (faction_id && faction_id in state.faction_relations) {
-            state.faction_relations[faction_id] -= 10;
             const faction_name = FACTIONS[faction_id]?.name ?? faction_id;
-            const faction_notice = `你攻击了 ${faction_name} 的部队，关系下降。`;
-            message += ` (${faction_notice})`;
+            // 封臣参战：攻击王国敌国 = 功勋，攻击友军 = 掉好感
+            let kingdomId: string | null = null;
+            if (faction_id in RF_TO_KINGDOM) kingdomId = RF_TO_KINGDOM[faction_id];
+            else if (faction_id.startsWith("empire_") || ["sturgia","aserai","vlandia","battania","khuzait"].includes(faction_id)) kingdomId = faction_id;
+            if (state.vassal_of && kingdomId) {
+                const rel = FACTIONS[state.vassal_of]?.relations?.[kingdomId] ?? 0;
+                if (rel < 0) {
+                    state.renown = (state.renown ?? 0) + 5;
+                    const honor_notice = `你攻击了敌国 ${faction_name} 的部队，为王国建功！声望 +5。`;
+                    message += ` (${honor_notice})`;
+                } else {
+                    state.faction_relations[faction_id] -= 10;
+                    const friend_notice = `你攻击了友军 ${faction_name} 的部队，关系下降！`;
+                    message += ` (${friend_notice})`;
+                }
+            } else {
+                state.faction_relations[faction_id] -= 10;
+                const faction_notice = `你攻击了 ${faction_name} 的部队，关系下降。`;
+                message += ` (${faction_notice})`;
+            }
         }
 
         state.add_log(`选择筑防坚守。${message}`);
@@ -1212,6 +1247,48 @@ export function recruit(state: any, location_id: string, unit_id: string, quanti
     return msg;
 }
 
+/** 向八王国宣誓效忠，成为其封臣。 */
+export function swear_fealty(state: any, kingdom_id: string): string {
+    if (state.is_king) {
+        return `你已是 [${state.kingdom_name}] 的国王，无法向他人效忠！`;
+    }
+    if (state.vassal_of) {
+        const cur = FACTIONS[state.vassal_of]?.name ?? state.vassal_of;
+        return `你已向 [${cur}] 宣誓效忠，叛变前无法另投他国！`;
+    }
+    if (state.renown < 100) {
+        return `声望不足，无法效忠！至少需要 100 声望，当前声望：${state.renown}。`;
+    }
+    const f = FACTIONS[kingdom_id];
+    if (!f) {
+        return `未知王国: ${kingdom_id}`;
+    }
+    state.vassal_of = kingdom_id;
+    state.faction_relations[kingdom_id] = (state.faction_relations[kingdom_id] ?? 0) + 30;
+    const msg = `你向 [${f.name}] 宣誓效忠，成为其封臣！王国好感 +30。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 叛变：脱离当前效忠的王国。 */
+export function renounce_fealty(state: any): string {
+    if (!state.vassal_of) {
+        return `你尚未效忠任何王国，无需叛变！`;
+    }
+    const old = FACTIONS[state.vassal_of]?.name ?? state.vassal_of;
+    state.faction_relations[state.vassal_of] = (state.faction_relations[state.vassal_of] ?? 0) - 30;
+    const fid = state.vassal_of;
+    state.vassal_of = null;
+    const msg = `你背叛了 [${old}]！王国好感 -30。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 获取玩家当前效忠的王国信息。 */
+export function get_vassal_info(state: any): { kingdom_id: string; name: string; color: string } | null {
+    if (!state.vassal_of) return null;
+    const f = FACTIONS[state.vassal_of];
+    if (!f) return null;
+    return { kingdom_id: state.vassal_of, name: f.name, color: f.color };
+}
 /** 建国称王逻辑。 */
 export function declare_kingdom(state: any, kingdom_name: string): string {
     if (state.is_king) {
