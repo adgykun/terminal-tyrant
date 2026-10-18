@@ -302,20 +302,25 @@ export function update_faction_relations(state: any): void {
             });
             if (defLocs.length > 0) {
                 const target = randomChoice(defLocs);
-                const newsMsg = `【战场情报】${FACTIONS[atk].name} 大军正在围攻 ${FACTIONS[def].name} 的 [${target.name}]！你可以在王国面板响应号召，或亲自前往支援。`;
-                state.add_log(newsMsg);
-                // AI 围城真实演化：55% 概率破城易主（攻方拿下守方城镇）
-                if (Math.random() < 0.55) {
-                    target.faction_id = RF_TO_KINGDOM[atk] || atk;
-                    const resultMsg = `【战报】${FACTIONS[atk].name} 攻陷了 ${FACTIONS[def].name} 的 [${target.name}]！`;
-                    state.add_log(resultMsg);
-                    // 若玩家在该城有利益（封地/所在地）则给提示
+                // 已在围城中则不重复登记
+                const existing = (state.ai_sieges ?? []).some((x: any) => x.location_id === target.id);
+                if (!existing) {
+                    const threat = {
+                        location_id: target.id,
+                        attacker: atk,
+                        defender: def,
+                        days_remaining: 3 + Math.floor(Math.random() * 3), // 3~5 天响应窗口
+                        strength: 40 + Math.floor(Math.random() * 61),      // 40~100 攻方兵力
+                    };
+                    state.ai_sieges = state.ai_sieges ?? [];
+                    state.ai_sieges.push(threat);
+                    const newsMsg = `【战场情报】${FACTIONS[atk].name} 大军正在围攻 ${FACTIONS[def].name} 的 [${target.name}]！${threat.days_remaining} 天内可前往支援或守城。`;
+                    state.add_log(newsMsg);
                     if (state.location === target.id) {
-                        state.add_log(`你所在的城市 [${target.name}] 已被 ${FACTIONS[atk].name} 占领！`);
+                        state.add_log(`⚠ 你所在的城市 [${target.name}] 正被围攻！可在城镇面板迎战守军。`);
                     }
                     if (state.fiefs.includes(target.id)) {
-                        state.fiefs = state.fiefs.filter((f: string) => f !== target.id);
-                        state.add_log(`你的封地 [${target.name}] 被 ${FACTIONS[atk].name} 夺走！`);
+                        state.add_log(`⚠ 你的封地 [${target.name}] 正被围攻！请尽快驰援。`);
                     }
                 }
             }
@@ -588,6 +593,7 @@ export function daily_update(state: any): string {
     if (state.siege) {
         siege_daily_progress(state);
     }
+    ai_siege_daily_progress(state);
     for (const loc_id of Object.keys(LOCATIONS)) {
         generate_quests(loc_id);
     }
@@ -1400,31 +1406,71 @@ export function defend_siege(state: any, location_id: string): string {
     if (!loc) return `地点不存在`;
     const my_army = calculate_army_power(state.troops) + (state.personal_power ?? 0);
     if (my_army <= 0) return `你没有可作战的部队，无法守城！`;
-    // AI 攻方兵力 = 领地人口繁荣度 + 随机（模拟大军）
+    // 优先取 AI 围城威胁的攻方强度
+    const threat = (state.ai_sieges ?? []).find((x: any) => x.location_id === location_id);
     const garrison = loc.garrison_power ?? 20;
-    const enemy_power = Math.max(garrison, Math.floor(garrison * (1.2 + Math.random() * 0.6)));
+    // 无威胁时按守军强度模拟；有威胁时按威胁强度
+    const enemy_power = threat
+        ? threat.strength
+        : Math.max(garrison, Math.floor(garrison * (1.2 + Math.random() * 0.6)));
     if (my_army >= enemy_power) {
         // 守城成功
         const loss = Math.floor(my_army * 0.15);
         state.troops = apply_casualties(state.troops, Math.min(loss, 8));
+        clear_ai_siege(state, location_id);
         const msg = `【守城战】你率军死守 [${loc.name}]，击退敌军！城池安然无恙。`;
         state.add_log(msg);
         state.morale = Math.min(100, (state.morale ?? 50) + 10);
         state.renown = (state.renown ?? 0) + 15;
+        if (state.vassal_of) state.influence = (state.influence ?? 0) + 10;
         return msg;
     } else {
         // 守城失败，城池易主
         const loss = Math.floor(my_army * 0.5);
         state.troops = apply_casualties(state.troops, loss);
-        const attacker_faction = loc.faction_id;
-        const conquer_faction = state.vassal_of ? (FACTIONS[state.vassal_of] ? Object.keys(FACTIONS).find(k => FACTIONS[k].relations?.[attacker_faction] < 0) ?? attacker_faction : attacker_faction) : attacker_faction;
+        const conquer_faction = threat ? (RF_TO_KINGDOM[threat.attacker] || threat.attacker) : (state.vassal_of ? (FACTIONS[state.vassal_of] ? Object.keys(FACTIONS).find(k => FACTIONS[k].relations?.[loc.faction_id] < 0) ?? loc.faction_id : loc.faction_id) : loc.faction_id);
         loc.faction_id = conquer_faction;
+        clear_ai_siege(state, location_id);
         const msg = `【守城战】敌众我寡，[${loc.name}] 沦陷！你损失 ${loss} 人，被迫撤离。`;
         state.add_log(msg);
         state.morale = Math.max(0, (state.morale ?? 50) - 15);
         return msg;
     }
 }
+/** AI 围攻每日推进：天数递减，到期未解围则破城易主。 */
+export function ai_siege_daily_progress(state: any): void {
+    if (!state.ai_sieges || state.ai_sieges.length === 0) return;
+    const remaining: any[] = [];
+    for (const th of state.ai_sieges) {
+        th.days_remaining -= 1;
+        if (th.days_remaining > 0) {
+            remaining.push(th);
+            continue;
+        }
+        // 到期：AI 破城
+        const loc = get_location(state, th.location_id);
+        if (loc) {
+            loc.faction_id = RF_TO_KINGDOM[th.attacker] || th.attacker;
+            const resultMsg = `【战报】${FACTIONS[th.attacker]?.name ?? th.attacker} 攻陷了 ${FACTIONS[th.defender]?.name ?? th.defender} 的 [${loc.name}]！`;
+            state.add_log(resultMsg);
+            if (state.location === loc.id) {
+                state.add_log(`你所在的城市 [${loc.name}] 已被敌军占领！`);
+            }
+            if (state.fiefs.includes(loc.id)) {
+                state.fiefs = state.fiefs.filter((f: string) => f !== loc.id);
+                state.add_log(`你的封地 [${loc.name}] 被夺走！`);
+            }
+        }
+    }
+    state.ai_sieges = remaining;
+}
+
+/** 玩家守城：清除对应 AI 围城威胁。 */
+export function clear_ai_siege(state: any, location_id: string): void {
+    if (!state.ai_sieges) return;
+    state.ai_sieges = state.ai_sieges.filter((x: any) => x.location_id !== location_id);
+}
+
 /** 封臣加入王国军团（跟随军团行军/参战）。 */
 export function join_army(state: any, army_id: string): string {
     if (!state.vassal_of) {
