@@ -121,7 +121,28 @@ export default function App() {
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
       case "battle":
-        return <BattleView playerTroops={gs.troops} />;
+        return (
+          <BattleView
+            playerTroops={gs.troops}
+            onBattleEnd={(result) => {
+              // 战斗结束：把按兵种伤亡精确写回 state.troops
+              game.performAction((s: any) => {
+                const t = s.troops ?? {};
+                for (const [id, cnt] of Object.entries(result.casualties)) {
+                  if (cnt > 0 && t[id] != null) t[id] = Math.max(0, t[id] - cnt);
+                }
+                const lost = Object.values(result.casualties as Record<string, number>)
+                  .reduce((a: number, b) => a + b, 0);
+                s.add_log?.(
+                  result.won
+                    ? `3D 战场大捷！阵亡 ${lost} 人，余部 ${Object.values(result.survivors as Record<string, number>).reduce((a: number, b) => a + b, 0)} 人凯旋。`
+                    : `3D 战场失利…部队全灭，伤亡 ${lost} 人。`
+                );
+                return { message: result.won ? "胜利！伤亡已记入部队。" : "溃败…伤亡已记入部队。" };
+              });
+            }}
+          />
+        );
       default:
         return <WorldMapCanvas state={gs} onMove={() => {}} />;
     }
