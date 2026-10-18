@@ -66,6 +66,7 @@ export function useGame() {
   const startNewGame = useCallback((str: number, int: number, charm: number) => {
     const gs = new GameState();
     engine.create_character(gs, str, int, charm);
+    engine.init_region(gs, "calradia"); // 直接进入卡拉迪亚大陆（骑砍2 单地图）
     gs.add_log("你踏上了成为'终端暴君'的征途……");
     updateState(gs);
     setView("map");
