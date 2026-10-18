@@ -1392,7 +1392,38 @@ export function retreat_siege(state: any): string {
     const msg = `你从 [${loc?.name ?? ""}] 撤军，围城失败。`;
     state.siege = null;
     state.add_log(msg);
-    return msg;
+    return msg;}
+
+/** 守城战：玩家所在城镇被 AI 大军围攻时出战。胜则守城成功，败则城池易主。 */
+export function defend_siege(state: any, location_id: string): string {
+    const loc = get_location(state, location_id);
+    if (!loc) return `地点不存在`;
+    const my_army = calculate_army_power(state.troops) + (state.personal_power ?? 0);
+    if (my_army <= 0) return `你没有可作战的部队，无法守城！`;
+    // AI 攻方兵力 = 领地人口繁荣度 + 随机（模拟大军）
+    const garrison = loc.garrison_power ?? 20;
+    const enemy_power = Math.max(garrison, Math.floor(garrison * (1.2 + Math.random() * 0.6)));
+    if (my_army >= enemy_power) {
+        // 守城成功
+        const loss = Math.floor(my_army * 0.15);
+        state.troops = apply_casualties(state.troops, Math.min(loss, 8));
+        const msg = `【守城战】你率军死守 [${loc.name}]，击退敌军！城池安然无恙。`;
+        state.add_log(msg);
+        state.morale = Math.min(100, (state.morale ?? 50) + 10);
+        state.renown = (state.renown ?? 0) + 15;
+        return msg;
+    } else {
+        // 守城失败，城池易主
+        const loss = Math.floor(my_army * 0.5);
+        state.troops = apply_casualties(state.troops, loss);
+        const attacker_faction = loc.faction_id;
+        const conquer_faction = state.vassal_of ? (FACTIONS[state.vassal_of] ? Object.keys(FACTIONS).find(k => FACTIONS[k].relations?.[attacker_faction] < 0) ?? attacker_faction : attacker_faction) : attacker_faction;
+        loc.faction_id = conquer_faction;
+        const msg = `【守城战】敌众我寡，[${loc.name}] 沦陷！你损失 ${loss} 人，被迫撤离。`;
+        state.add_log(msg);
+        state.morale = Math.max(0, (state.morale ?? 50) - 15);
+        return msg;
+    }
 }
 /** 封臣加入王国军团（跟随军团行军/参战）。 */
 export function join_army(state: any, army_id: string): string {
@@ -1419,6 +1450,55 @@ export function leave_army(state: any): string {
     const msg = `你脱离了王国军团，恢复独立行动。`;
     state.add_log(msg);
     return msg;
+}
+/** 获取玩家当前影响力。 */
+export function get_influence(state: any): number {
+    return state.influence ?? 0;
+}
+/** 增加影响力（战斗胜利/响应号召/占领封地等）。 */
+export function add_influence(state: any, amount: number): void {
+    state.influence = Math.max(0, (state.influence ?? 0) + amount);
+}
+/** 消耗影响力（尝试扣除，不足返回 false）。 */
+export function spend_influence(state: any, amount: number): boolean {
+    const cur = state.influence ?? 0;
+    if (cur < amount) return false;
+    state.influence = cur - amount;
+    return true;
+}
+/** 用影响力向国王申请封地（骑砍2：影响力换封地）。 */
+export function request_fief_with_influence(state: any, location_id: string): string {
+    if (!state.vassal_of) {
+        return `只有封臣才能向国王申请封地！`;
+    }
+    const loc = get_location(state, location_id);
+    if (!loc) return `地点不存在`;
+    if (loc.owner === "player") return `[${loc.name}] 已是你自己的领地！`;
+    const COST = 300;
+    if ((state.influence ?? 0) < COST) {
+        return `影响力不足！申请封地需要 ${COST} 影响力，当前：${state.influence ?? 0}。`;
+    }
+    state.influence -= COST;
+    loc.owner = "player";
+    loc.faction_id = state.vassal_of;
+    if (!state.fiefs.includes(location_id)) state.fiefs.push(location_id);
+    const msg = `你用 ${COST} 影响力向国王申请，成功获得 [${loc.name}] 作为封地！`;
+    state.add_log(msg);
+    return msg;
+}
+/** 每日影响力结算：封臣按封地数/官职获得影响力收入。 */
+export function daily_influence_income(state: any): string {
+    if (!state.vassal_of) return "";
+    let income = 0;
+    income += state.fiefs.length * 5; // 每块封地 +5
+    if (state.is_king) income += 20;
+    if (income > 0) {
+        state.influence = (state.influence ?? 0) + income;
+        const msg = `每日影响力收入 +${income}（封地 ${state.fiefs.length} 块）。`;
+        state.add_log(msg);
+        return msg;
+    }
+    return "";
 }
 /** 攻城胜利结算：归属王国、声望、好感、封地。 */
 function finish_siege(state: any, loc: any, msgs: string[]): string {
@@ -1857,6 +1937,76 @@ export function visit_tavern(state: any, action: string | null = null, tip_amoun
     };
 }
 
+/** 竞技大会锦标赛：多轮淘汰制，冠军获大奖（骑砍2 核心）。 */
+export function tournament_battle(state: any, location_id: string): string {
+    const loc = get_location(state, location_id);
+    if (!loc) return `地点不存在`;
+    if (!loc.arena) return `[${loc.name ?? location_id}] 没有竞技场！`;
+    if (state.competing_tournament) return `你已参加当前锦标赛！`;
+
+    let eq_bonus = 0;
+    if (state.equipment && typeof state.equipment === "object") {
+        for (const eq_id of Object.values(state.equipment) as string[]) {
+            if (eq_id in EQUIPMENT) eq_bonus += EQUIPMENT[eq_id].power_bonus ?? 0;
+        }
+    }
+    const player_power = state.personal_power + eq_bonus;
+    // 4 轮淘汰：16→8→4→2→1
+    const TOTAL_ROUNDS = 4;
+    let wins = 0;
+    let alive = true;
+    let prize = 0;
+    for (let r = 1; r <= TOTAL_ROUNDS && alive; r++) {
+        const opps = 2 ** (5 - r); // 16, 8, 4, 2
+        for (let m = 0; m < Math.min(opps, 1); m++) {
+            const opp_power = Math.max(1, Math.floor(player_power * (0.75 + Math.random() * 0.5)));
+            if (player_power >= opp_power) {
+                wins++;
+            } else {
+                alive = false;
+                break;
+            }
+        }
+    }
+    state.competing_tournament = true;
+    if (alive) {
+        // 冠军
+        prize = 800 + Math.floor(Math.random() * 400);
+        state.gold += prize;
+        state.renown += 30;
+        state.morale = Math.min(100, state.morale + 20);
+        const eq_id = randomChoice(Object.keys(EQUIPMENT));
+        const eq_item = { ...EQUIPMENT[eq_id] };
+        state.loot.push(eq_item);
+        const msg = `【竞技大会】你一路过关斩将，赢得 [${loc.name}] 锦标赛冠军！奖励 ${prize} 金、声望 +30、士气 +20，并获得战利品 [${eq_item.name}]！`;
+        state.add_log(msg);
+        state.competing_tournament = false;
+        return msg;
+    } else {
+        const msg = `【竞技大会】你在 [${loc.name}] 锦标赛第 ${wins + 1} 轮败北，未能夺冠。`;
+        state.add_log(msg);
+        state.competing_tournament = false;
+        return msg;
+    }
+}
+/** 酒馆招募雇佣兵（特殊兵种，可并入部队）。 */
+export function hire_mercenary(state: any, unit_id: string, quantity: number): string {
+    const MERC_UNITS = ["eastern_mercenary", "western_mercenary", "veteran_caravan_guard_empire", "battanian_raider"];
+    if (!MERC_UNITS.includes(unit_id)) {
+        return `该兵种不能从酒馆招募。`;
+    }
+    const unit_info = UNITS[unit_id] || {};
+    const cost_per = unit_info.recruit_cost ?? 100;
+    const total = cost_per * quantity;
+    if (state.cash < total) {
+        return `金钱不足！招募 ${quantity} 名 ${unit_info.name ?? unit_id} 需要 ${total} 金。`;
+    }
+    state.cash -= total;
+    state.troops[unit_id] = (state.troops[unit_id] ?? 0) + quantity;
+    const msg = `你在酒馆招募了 ${quantity} 名 ${unit_info.name ?? unit_id}，花费 ${total} 金。`;
+    state.add_log(msg);
+    return msg;
+}
 /** 访问铁匠铺，与铁匠交互并处理装备升级选项。 */
 export function visit_smithy(state: any, action: string | null = null): any {
     const welcome_dialogue = get_formatted_npc_dialogue("blacksmith", "enter_smithy", state);
