@@ -62,7 +62,7 @@ import {
     MERCENARY_CONTRACT_WAGE_INTERVAL,
 } from "./data.js";
 
-import { WORLD_REGIONS, get_region, RegionConfig } from "./world_regions.js";
+import { get_region, RegionConfig } from "./world_regions.js";
 import { generate_region_map } from "./map_generator.js";
 import {
     APPEARANCE_REVEAL_TEXTS,
@@ -2848,9 +2848,10 @@ export function haggle_trade(state: any, location_id: string, action: string, go
 
 // ==================== 区域辅助函数 ====================
 
-/** 返回所有可游玩区域配置。 */
+/** 返回所有可游玩区域配置（当前仅卡拉迪亚）。 */
 export function get_all_regions(): RegionConfig[] {
-    return WORLD_REGIONS;
+    const calradia = get_region("calradia");
+    return calradia ? [calradia] : [];
 }
 
 /** 初始化区域：根据 regionId 生成区域地图并存入 state。 */
