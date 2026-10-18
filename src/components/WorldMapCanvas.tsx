@@ -9,6 +9,11 @@ import { TERRAIN_COLORS, get_region } from "../core/world_regions";
 import type { GameState } from "../core/state";
 import { generateTerrainCanvas, type TerrainLayer } from "../core/terrain_noise";
 import { generateMapUnits, advanceUnits, type MapUnit } from "../core/map_units";
+import { BANNERLORD_TROOPS } from "../core/troops_bannerlord";
+
+function troopName(id: string): string {
+  return BANNERLORD_TROOPS[id]?.name ?? id;
+}
 
 // === 常量 ===
 const ARRIVE_RADIUS = 3.5;
@@ -771,6 +776,17 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
           </div>
           <div style={{ color: "#aaa", marginBottom: 8, fontSize: 11 }}>
             {selUnit.type === "army" && "各势力驻军/行军"}
+            {selUnit.type === "army" && selUnit.troops && (
+              <div style={{ marginTop: 8, padding: "8px 10px", background: "rgba(0,0,0,0.4)", borderRadius: 6, fontSize: 11, lineHeight: 1.7 }}>
+                <div style={{ color: "var(--accent-gold)", marginBottom: 4 }}>兵力构成</div>
+                {Object.entries(selUnit.troops).map(([uid, cnt]) => (
+                  <div key={uid} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span>{selUnit.troops && troopName(uid)}</span>
+                    <span>x{cnt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {selUnit.type === "caravan" && "沿商路运送货物"}
             {selUnit.type === "bandit" && "野外游荡，可遭劫掠"}
             {selUnit.type === "npc" && "游历各地的人物"}
