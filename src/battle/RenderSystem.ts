@@ -1,6 +1,19 @@
 /**
  * RenderSystem —— 把 ECS 实体（Position + Team）同步到 Three.js 渲染。
- * 内部维护 entityId -> Mesh 映射，实体销毁时自动移除。
+ *
+ * 渲染对象：
+ *  - 优先使用 GLTF 模型（ModelCache 预加载的 Xbot，带动画）；
+ *  - 模型未加载 / 加载失败时回退彩色锥体（保持原有行为）。
+ *
+ * 动画状态机：
+ *  - idle / walk / attack / death 按实体状态切换（移动→walk、锁定目标→attack、死亡→death）；
+ *  - AnimationMixer + crossFade 淡入淡出；
+ *  - 距相机超过 DISTANCE_CULL 的单位不更新动画（静态姿势），远处只同步位置。
+ *
+ * 外观：
+ *  - Team 决定染色（蓝方 / 红方 / 玩家淡蓝）；
+ *  - TroopType 决定缩放（步兵略大、弓手略小，玩家 1.5x）；
+ *  - 玩家实体（PlayerControl）用特殊高亮材质 + 更大体积。
  */
 import * as THREE from "three";
 import { System } from "../ecs/System";
@@ -8,19 +21,49 @@ import { Position } from "./Position";
 import { Team } from "./Team";
 import { Visual } from "./Visual";
 import { PlayerControl } from "./PlayerControl";
+import { TroopType } from "./TroopType";
+import { Health } from "./Health";
+import { Target } from "./Target";
+import { Velocity } from "./Velocity";
+import {
+  getModelClone,
+  getModelClips,
+  resolveAnimClip,
+  playAnim,
+  isModelLoaded,
+  type AnimKind,
+} from "./ModelCache";
+
+/** 单个实体的渲染状态（模型实例 or 锥体回退）。 */
+interface RenderUnit {
+  /** 根节点（模型 Group 或锥体 Mesh）。 */
+  root: THREE.Object3D;
+  /** 是否为 GLTF 模型（否则为锥体）。 */
+  isModel: boolean;
+  /** 动画混合器（仅模型）。 */
+  mixer: THREE.AnimationMixer | null;
+  /** 当前动画 clip（null = 未开始）。 */
+  currentClip: THREE.AnimationClip | null;
+  /** 当前 AnimationAction。 */
+  action: THREE.AnimationAction | null;
+  /** 上次动画语义（避免每帧重复切换）。 */
+  lastKind: AnimKind | null;
+  /** 模型名字（回退锥体时为 null）。 */
+  modelName: string | null;
+}
+
 export class RenderSystem extends System {
   private readonly scene: THREE.Scene;
   /** 摄像机（BattleView 可通过它实现轨道控制/跟随）。 */
   readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly meshes = new Map<number, THREE.Mesh>();
+  private readonly units = new Map<number, RenderUnit>();
   private readonly container: HTMLElement;
   // ===== 轨道控制 =====
   private theta = 0;            // 水平角
   private phi = 1.1;            // 俯仰角（clamp 0.25..1.45）
   private radius = 32;          // 到焦点距离
   private readonly target = new THREE.Vector3(0, 0, 0); // 观察焦点
-  private readonly tmp = new THREE.Vector3();
   private dragging = false;
   private lastX = 0;
   private lastY = 0;
@@ -29,6 +72,24 @@ export class RenderSystem extends System {
   private shakeTime = 0;
   private static readonly SHAKE_DURATION = 0.25;
   private static readonly SHAKE_AMPLITUDE = 0.35;
+  // ===== 模型 / 动画配置 =====
+  /** 超过此距离（世界单位）的单位不再更新动画，用静态姿势。 */
+  private static readonly DISTANCE_CULL = 50;
+  /** 默认兵种模型。 */
+  private static readonly DEFAULT_MODEL = "xbot";
+  /** 兵种 → 模型名（当前全部用 Xbot；后续可替换为 Quaternius 各兵种模型）。 */
+  private static readonly TROOP_MODEL: Record<string, string> = {
+    default: "xbot",
+  };
+  /** 兵种 → 缩放（相对基准 1.6m 身高的比例）。 */
+  private static readonly TROOP_SCALE: Record<string, number> = {
+    peasant: 0.9,
+    infantry: 1.05,
+    archer: 0.95,
+    cavalry: 1.15,
+  };
+  /** 玩家模型（英雄）。 */
+  private static readonly PLAYER_MODEL = "xbot";
 
   constructor(container: HTMLElement) {
     super("RenderSystem");
@@ -80,29 +141,34 @@ export class RenderSystem extends System {
     this.updateFocus(dt);
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
     const alive = new Set<number>();
+    const camPos = this.camera.position;
     for (const e of this.world.query(Position, Team, Visual)) {
       alive.add(e.id);
       const p = e.getComponent(Position)!;
       const t = e.getComponent(Team)!;
       const vis = e.getComponent(Visual)!;
-      let mesh = this.meshes.get(e.id);
-      if (!mesh) {
-        const geo = new THREE.ConeGeometry(vis.radius, vis.height, 6);
-        const mat = new THREE.MeshStandardMaterial({ color: t.color });
-        mesh = new THREE.Mesh(geo, mat);
-        mesh.castShadow = false;
-        this.scene.add(mesh);
-        this.meshes.set(e.id, mesh);
+      let unit = this.units.get(e.id);
+      if (!unit) {
+        unit = this.createUnit(e, t, vis);
+        this.scene.add(unit.root);
+        this.units.set(e.id, unit);
       }
-      mesh.position.set(p.x, p.y, p.z);
+      const pos = unit.root.position;
+      pos.set(p.x, p.y, p.z);
+      // 模型朝向：面向最近敌人（或默认朝 -x 方向，即敌方所在侧）
+      this.faceEnemy(e, unit.root);
+      // 动画更新（远距离跳过）
+      const dist = pos.distanceTo(camPos);
+      if (unit.mixer && dist < RenderSystem.DISTANCE_CULL) {
+        this.updateAnim(e, unit, dt);
+      }
     }
-    // 实体被销毁 → 同步移除对应 Mesh
-    for (const [id, mesh] of this.meshes) {
+    // 实体被销毁 → 同步移除渲染单位
+    for (const [id, unit] of this.units) {
       if (!alive.has(id)) {
-        this.scene.remove(mesh);
-        mesh.geometry.dispose();
-        (mesh.material as THREE.Material).dispose();
-        this.meshes.delete(id);
+        this.scene.remove(unit.root);
+        this.disposeUnit(unit);
+        this.units.delete(id);
       }
     }
     this.applyCamera();
@@ -120,11 +186,175 @@ export class RenderSystem extends System {
     this.container.removeEventListener("touchmove", this.onTouchMove);
     this.container.removeEventListener("touchend", this.onTouchEnd);
     this.world?.forEach((e) => {
-      this.meshes.delete(e.id);
+      this.units.delete(e.id);
     });
-    this.meshes.clear();
+    for (const unit of this.units.values()) this.disposeUnit(unit);
+    this.units.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+  }
+
+  // ===== 渲染单位创建 / 销毁 =====
+  /** 为实体创建渲染单位：优先 GLTF 模型，回退锥体。 */
+  private createUnit(
+    e: import("../ecs/Entity").Entity,
+    team: Team,
+    vis: Visual
+  ): RenderUnit {
+    const isPlayer = e.hasComponent(PlayerControl);
+    const troop = e.getComponent(TroopType)?.id ?? "default";
+    const modelName = isPlayer
+      ? RenderSystem.PLAYER_MODEL
+      : RenderSystem.TROOP_MODEL[troop] ?? RenderSystem.TROOP_MODEL.default;
+    if (isModelLoaded(modelName)) {
+      const group = getModelClone(modelName);
+      if (group) {
+        // 染色：递归遍历模型材质，按 team 染色；玩家高亮金色
+        this.tintModel(group, isPlayer ? 0xffdd66 : team.color, isPlayer);
+        // 缩放：玩家 1.5x，兵种差异化
+        const base = RenderSystem.TROOP_SCALE[troop] ?? 1;
+        const scale = isPlayer ? base * 1.5 : base;
+        group.scale.setScalar(scale);
+        // Xbot 模型正面朝向本地 +Z；游戏坐标系中 x 轴是左右、z 轴是纵深。
+        // 不预先旋转 Group（faceEnemy 每帧统一用 yaw 计算朝向）。
+        // 动画混合器
+        const mixer = new THREE.AnimationMixer(group);
+        return {
+          root: group,
+          isModel: true,
+          mixer,
+          currentClip: null,
+          action: null,
+          lastKind: null,
+          modelName,
+        };
+      }
+    }
+    // 回退：彩色锥体
+    const geo = new THREE.ConeGeometry(vis.radius, vis.height, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: team.color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = false;
+    return {
+      root: mesh,
+      isModel: false,
+      mixer: null,
+      currentClip: null,
+      action: null,
+      lastKind: null,
+      modelName: null,
+    };
+  }
+
+  /** 递归染色模型材质（按 team 色；玩家额外加金色 emissive）。 */
+  private tintModel(root: THREE.Object3D, color: number, isPlayer: boolean): void {
+    root.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (mat && mat.isMaterial) {
+          const tint = mat.clone();
+          tint.color.setHex(color);
+          if (isPlayer) {
+            tint.emissive = new THREE.Color(0x332200);
+            tint.emissiveIntensity = 0.4;
+          }
+          mesh.material = tint;
+        }
+      }
+    });
+  }
+
+  /** 朝向：玩家用 PlayerControl 的朝向；AI 用最近敌人（或默认朝敌方）。 */
+  private faceEnemy(e: import("../ecs/Entity").Entity, root: THREE.Object3D): void {
+    const p = e.getComponent(Position)!;
+    let dx = 0;
+    let dz = 0;
+    // 玩家：跟随输入朝向
+    const pc = e.getComponent(PlayerControl);
+    if (pc && (pc.dirX !== 0 || pc.dirZ !== 0)) {
+      dx = pc.dirX;
+      dz = pc.dirZ;
+    } else {
+      const targetId = e.getComponent(Target)?.targetId;
+      if (targetId != null) {
+        const target = this.world.getEntity(targetId);
+        const tp = target?.getComponent(Position);
+        if (tp) {
+          dx = tp.x - p.x;
+          dz = tp.z - p.z;
+        }
+      }
+      // 无目标：默认朝敌方（x 负方向）
+      if (dx === 0 && dz === 0) {
+        dx = -1;
+      }
+    }
+    if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+      // 模型本地正面为 +Z：rotation.y = atan2(dirX, dirZ) 使 +Z 指向 (dx, dz)
+      root.rotation.y = Math.atan2(dx, dz);
+    }
+  }
+
+  /** 更新动画状态机（idle/walk/attack/death + crossFade）。 */
+  private updateAnim(
+    e: import("../ecs/Entity").Entity,
+    unit: RenderUnit,
+    dt: number
+  ): void {
+    const mixer = unit.mixer!;
+    if (!unit.action) {
+      // 首次：先播 idle
+      const idle = resolveAnimClip(unit.modelName!, "idle", getModelClips(unit.modelName!)[0] ?? null);
+      if (idle) {
+        unit.action = playAnim(mixer, idle, null);
+        unit.currentClip = idle;
+        unit.lastKind = "idle";
+      }
+    }
+    // 推进混合器（含 crossFade 过程）
+    mixer.update(dt);
+    // 计算应播放的动画
+    const kind = this.resolveAnimKind(e);
+    if (kind === unit.lastKind) return;
+    const fallback = unit.currentClip ?? getModelClips(unit.modelName!)[0] ?? null;
+    const next = resolveAnimClip(unit.modelName!, kind, fallback);
+    if (!next || next === unit.currentClip) {
+      unit.lastKind = kind;
+      return;
+    }
+    unit.action = playAnim(mixer, next, unit.action, 0.25);
+    unit.currentClip = next;
+    unit.lastKind = kind;
+  }
+
+  /** 根据实体状态决定动画语义。 */
+  private resolveAnimKind(e: import("../ecs/Entity").Entity): AnimKind {
+    const hp = e.getComponent(Health);
+    if (!hp?.alive) return "death";
+    const vel = e.getComponent(Velocity);
+    const speed = vel ? Math.hypot(vel.vx, vel.vz) : 0;
+    const hasTarget = e.getComponent(Target)?.targetId != null;
+    if (hasTarget && speed < 0.2) return "attack"; // 在攻击距离内站定 → 攻击
+    if (speed > 0.2) return "walk";
+    return "idle";
+  }
+
+  /** 释放渲染单位资源。 */
+  private disposeUnit(unit: RenderUnit): void {
+    if (unit.mixer) {
+      unit.mixer.stopAllAction();
+      unit.mixer.uncacheRoot(unit.root);
+    }
+    unit.root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.geometry?.dispose();
+        const mat = mesh.material as THREE.Material;
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat?.dispose();
+      }
+    });
   }
 
   // ===== 轨道控制实现 =====
@@ -192,7 +422,6 @@ export class RenderSystem extends System {
   }
 
   // ----- 指针/滚轮/触摸 -----
-
   private onPointerDown = (e: PointerEvent): void => {
     this.dragging = true;
     this.lastX = e.clientX;
@@ -201,30 +430,25 @@ export class RenderSystem extends System {
     el.setPointerCapture(e.pointerId);
     el.style.cursor = "grabbing";
   };
-
   private onPointerMove = (e: PointerEvent): void => {
     if (!this.dragging) return;
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
     this.lastX = e.clientX;
     this.lastY = e.clientY;
-    // 拖拽旋转
     this.theta -= dx * 0.006;
     this.phi = Math.max(0.25, Math.min(1.45, this.phi - dy * 0.004));
   };
-
   private onPointerUp = (e: PointerEvent): void => {
     this.dragging = false;
     const el = this.renderer.domElement;
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     el.style.cursor = "grab";
   };
-
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     this.radius = Math.max(10, Math.min(70, this.radius + e.deltaY * 0.03));
   };
-
   private onTouchStart = (e: TouchEvent): void => {
     if (e.touches.length === 2) {
       this.pinchDist = Math.hypot(
@@ -233,7 +457,6 @@ export class RenderSystem extends System {
       );
     }
   };
-
   private onTouchMove = (e: TouchEvent): void => {
     if (e.touches.length === 2) {
       e.preventDefault();
@@ -247,7 +470,6 @@ export class RenderSystem extends System {
       this.pinchDist = d;
     }
   };
-
   private onTouchEnd = (): void => {
     this.pinchDist = 0;
   };

@@ -29,6 +29,7 @@ import { CombatSystem } from "./CombatSystem";
 import { RenderSystem } from "./RenderSystem";
 import { PlayerControl } from "./PlayerControl";
 import { PlayerInputSystem } from "./PlayerInputSystem";
+import { preloadModels } from "./ModelCache";
 
 /** 战斗结算数据。 */
 export interface BattleEndResult {
@@ -71,9 +72,25 @@ export function BattleView({
 
   const [total] = useState({ p: pList.length, e: eList.length });
   const [stats, setStats] = useState<{ p: number; e: number }>({ p: pList.length, e: eList.length });
+  // 模型加载进度（null = 未开始 / 已完成）
+  const [modelProgress, setModelProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   // 战斗结束只触发一次
   const endedRef = useRef(false);
+
+  // 预加载 3D 模型（避免战斗开始时卡顿）；失败自动回退锥体，不影响战斗
+  useEffect(() => {
+    let cancelled = false;
+    setModelProgress({ loaded: 0, total: 1 });
+    preloadModels((loaded, total) => {
+      if (!cancelled) setModelProgress({ loaded, total });
+    }).then(() => {
+      if (!cancelled) setModelProgress(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -218,6 +235,11 @@ export function BattleView({
         <span>
           ⚔ ECS 战场 · 蓝 {stats.p}/{total.p} · 红 {stats.e}/{total.e}
         </span>
+        {modelProgress && (
+          <span className="battle-loading">
+            ⏳ 加载模型 {modelProgress.loaded}/{modelProgress.total}
+          </span>
+        )}
         {over && <span className="battle-over">{over}</span>}
       </div>
     </div>
