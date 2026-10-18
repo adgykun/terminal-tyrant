@@ -107,6 +107,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
   const terrainSeedRef = useRef(0);
   const [physicalSize, setPhysicalSize] = useState({ w: 0, h: 0 });
   const [dayToast, setDayToast] = useState(0);
+  const [clashToast, setClashToast] = useState<string[]>([]);
 
   // 地点缓存
   const locations = get_map_locations(state);
@@ -128,6 +129,13 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
     unitsRef.current = generateMapUnits(region, usable, seed);
   }, [state.selected_region, locations]);
   useEffect(() => { selUnitRef.current = selUnit; }, [selUnit]);
+
+  // 军团战斗消息 toast 3 秒后自动消失
+  useEffect(() => {
+    if (clashToast.length === 0) return;
+    const t = setTimeout(() => setClashToast([]), 3000);
+    return () => clearTimeout(t);
+  }, [clashToast]);
 
   // === 初始化玩家位置 ===
   useEffect(() => {
@@ -269,10 +277,15 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         const tl = terrainRef.current;
         ctx.drawImage(tl.canvas, tl.worldX, tl.worldY, tl.worldW, tl.worldH);
       }
-      // AI 单位逐帧推进（活地图）
+      // AI 单位逐帧推进（活地图，返回军团战斗消息）
       {
         const usable = (locations as any[]).filter((l) => typeof l.x === "number");
-        if (unitsRef.current.length) advanceUnits(unitsRef.current, dt, usable, 0);
+        if (unitsRef.current.length) {
+          const clashMsgs = advanceUnits(unitsRef.current, dt, usable, 0);
+          if (clashMsgs.length > 0) {
+            setClashToast((prev) => [...prev.slice(-2), ...clashMsgs]);
+          }
+        }
       }
 
       // 河流（区域模式）
@@ -382,6 +395,24 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         ctx.arc(lx, ly, 0.5, 0, Math.PI * 2);
         ctx.fillStyle = isCur ? "#d4a843" : fColor;
         ctx.fill();
+        // 围城标记（火焰 + 敌方警示）
+        if (state.siege?.location_id === (loc as any).id) {
+          // 火焰（三层，随时间跳动）
+          const t = Date.now() / 500;
+          const flicker = Math.sin(t + lx * 3) * 0.2;
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(lx - 0.25 + i * 0.25, ly - 1.5 - i * 0.4 + flicker * 0.3, 0.35 - i * 0.08, 0, Math.PI * 2);
+            ctx.fillStyle = i === 0 ? "#ff8c00" : i === 1 ? "#ffc107" : "#fff3cd";
+            ctx.fill();
+          }
+          // 红色警示外圈（呼吸）
+          ctx.beginPath();
+          ctx.arc(lx, ly, 1.8 + Math.sin(t * 1.5) * 0.3, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(220,60,40,0.7)";
+          ctx.lineWidth = 0.15;
+          ctx.stroke();
+        }
         // 标签
         ctx.font = "0.8px sans-serif";
         ctx.fillStyle = isCur ? "#d4a843" : "#ccc";
@@ -812,6 +843,16 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       {/* 跨天飘字 */}
       {dayToast > 0 && (
         <div className="wmc-day-toast">+{dayToast} 天</div>
+      )}
+      {/* 军团战斗消息 toast */}
+      {clashToast.length > 0 && (
+        <div style={{ position: "absolute", top: 90, left: 12, zIndex: 15, display: "flex", flexDirection: "column", gap: 4, maxWidth: 240 }}>
+          {clashToast.map((m, i) => (
+            <div key={i} style={{ background: "rgba(120,30,20,0.9)", color: "#ffd9a0", border: "1px solid #ff8c00", borderRadius: 6, padding: "4px 8px", fontSize: 11, lineHeight: 1.5 }}>
+              ⚔ {m}
+            </div>
+          ))}
+        </div>
       )}
 
       {/* 模式切换按钮 */}
