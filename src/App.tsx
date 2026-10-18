@@ -11,6 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { QuestPanel } from "./components/QuestPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
+import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army } from "./core/engine";
 
 export default function App() {
@@ -119,6 +120,8 @@ export default function App() {
         return <QuestPanel state={gs} performAction={game.performAction} />;
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
+      case "battle":
+        return <BattleView />;
       default:
         return <WorldMapCanvas state={gs} onMove={() => {}} />;
     }
