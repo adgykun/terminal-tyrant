@@ -121,7 +121,7 @@ export default function App() {
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
       case "battle":
-        return <BattleView />;
+        return <BattleView playerTroops={gs.troops} />;
       default:
         return <WorldMapCanvas state={gs} onMove={() => {}} />;
     }
