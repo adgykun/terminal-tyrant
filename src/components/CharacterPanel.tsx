@@ -93,7 +93,7 @@ export function CharacterPanel({ state, performAction }: CharacterPanelProps) {
           return Object.entries(FACTIONS).map(([fId, faction]: [string, any]) => {
           const relation = state.faction_relations[fId] ?? 0;
           const relPercent = Math.max(0, Math.min(100, (relation + 100) / 2));
-          const color = fId === "f1" ? "var(--faction-blue)" : fId === "f2" ? "var(--faction-green)" : "var(--faction-red)";
+          const color = faction.color === "blue" ? "var(--faction-blue)" : faction.color === "green" ? "var(--faction-green)" : faction.color === "red" ? "var(--faction-red)" : faction.color === "brown" ? "var(--faction-brown)" : "var(--faction-purple)";
           return (
             <div key={fId} className="mb-8">
               <div className="flex-row" style={{ justifyContent: "space-between", marginBottom: "4px" }}>
@@ -106,6 +106,36 @@ export function CharacterPanel({ state, performAction }: CharacterPanelProps) {
             </div>
           );
           });
+        })()}
+        <div className="divider" />
+        <div className="panel-title" style={{ marginTop: 12 }}>卡拉迪亚王国态势</div>
+        {(() => {
+          const KINGDOMS = ["empire_n", "empire_w", "empire_s", "sturgia", "aserai", "vlandia", "battania", "khuzait"];
+          const rows: { name: string; color: string; atWar: string[]; atPeace: string[] }[] = [];
+          for (const k of KINGDOMS) {
+            const f = FACTIONS[k];
+            if (!f) continue;
+            const atWar: string[] = [];
+            const atPeace: string[] = [];
+            for (const j of KINGDOMS) {
+              if (j === k) continue;
+              const rel = f.relations?.[j] ?? 0;
+              if (rel < 0) atWar.push(FACTIONS[j]?.name ?? j);
+              else atPeace.push(FACTIONS[j]?.name ?? j);
+            }
+            rows.push({ name: f.name, color: f.color, atWar, atPeace });
+          }
+          return rows.map(row => (
+            <div key={row.name} className="mb-8">
+              <div className="flex-row" style={{ justifyContent: "space-between", marginBottom: "4px" }}>
+                <span className="text-sm text-bold" style={{ color: row.color === "blue" ? "var(--faction-blue)" : row.color === "green" ? "var(--faction-green)" : row.color === "red" ? "var(--faction-red)" : row.color === "brown" ? "var(--faction-brown)" : "var(--faction-purple)" }}>{row.name}</span>
+              </div>
+              <div className="text-sm text-muted">
+                {row.atWar.length > 0 ? <span className="text-red">交战: {row.atWar.join("、")}</span> : <span>与诸国和平</span>}
+                {row.atPeace.length > 0 && <span> | 和平: {row.atPeace.join("、")}</span>}
+              </div>
+            </div>
+          ));
         })()}
       </div>
 
