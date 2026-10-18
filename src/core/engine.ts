@@ -514,6 +514,10 @@ export function conquer_location(state: any, location_id: string, action: string
 export function daily_update(state: any): string {
     // 0. 外交动态演变与任务生成
     update_faction_relations(state);
+    // 0.0 围城自动推进（每日一次）
+    if (state.siege) {
+        siege_daily_progress(state);
+    }
     for (const loc_id of Object.keys(LOCATIONS)) {
         generate_quests(loc_id);
     }
@@ -1247,6 +1251,104 @@ export function recruit(state: any, location_id: string, unit_id: string, quanti
     return msg;
 }
 
+/** 判断某地点是否属于敌国（相对玩家效忠的王国）。 */
+function kingdom_of_location(loc: any): string | null {
+    if (!loc || !loc.faction_id) return null;
+    if (loc.faction_id in RF_TO_KINGDOM) return RF_TO_KINGDOM[loc.faction_id];
+    if (loc.faction_id.startsWith("empire_") || ["sturgia","aserai","vlandia","battania","khuzait"].includes(loc.faction_id)) return loc.faction_id;
+    return null;
+}
+/** 开始围城（封臣攻城战）：目标须为敌国领地。 */
+export function start_siege(state: any, location_id: string): string {
+    if (!state.vassal_of) {
+        return `只有封臣才能发动攻城战！请先效忠一个王国。`;
+    }
+    if (state.siege) {
+        return `你正在围攻 [${get_location(state, state.siege.location_id)?.name ?? ""}]，无法同时开新战场！`;
+    }
+    const loc = get_location(state, location_id);
+    if (!loc) return `地点不存在`;
+    if (loc.owner === "player") return `[${loc.name}] 已是你自己的领地，无需攻打！`;
+    if (loc.owner === state.vassal_of) return `[${loc.name}] 已是己方王国领地，无需攻打！`;
+    const targetK = kingdom_of_location(loc);
+    if (!targetK) return `[${loc.name}] 不属于任何王国，无法发动攻城战！`;
+    if (targetK === state.vassal_of) return `[${loc.name}] 属于己方王国，不可攻打！`;
+    const rel = FACTIONS[state.vassal_of]?.relations?.[targetK] ?? 0;
+    if (rel >= 0) {
+        const fname = FACTIONS[targetK]?.name ?? targetK;
+        return `[${loc.name}] 属于 ${fname}，当前并非敌国（好感 ${rel}），不可宣战。`;
+    }
+    const garrison = 30 + Math.floor(Math.random() * 40);
+    state.siege = { location_id, days_remaining: 3, garrison };
+    const msg = `你率军包围了敌国领地 [${loc.name}]！守军约 ${garrison} 人，预计 3 天可破城。每日推进或强攻。`;
+    state.add_log(msg);
+    return msg;
+}
+/** 围城每日推进：守军抵抗，天数减少，破城则拿下。 */
+export function siege_daily_progress(state: any): string {
+    if (!state.siege) return `当前没有进行中的攻城战。`;
+    const loc = get_location(state, state.siege.location_id);
+    const defender_loss = Math.min(state.siege.garrison, 10 + Math.floor(Math.random() * 8));
+    state.siege.garrison -= defender_loss;
+    const attacker_loss = Math.min((Object.values(state.troops) as number[]).reduce((a, b) => a + b, 0) * 0.1, 15);
+    state.troops = apply_casualties(state.troops, Math.floor(attacker_loss));
+    let msgs: string[] = [];
+    msgs.push(`围城第 ${4 - state.siege.days_remaining} 天：守军损失 ${defender_loss} 人，你方损失 ${Math.floor(attacker_loss)} 人。`);
+    if (state.siege.garrison <= 0) {
+        return finish_siege(state, loc, msgs);
+    }
+    state.siege.days_remaining -= 1;
+    if (state.siege.days_remaining <= 0) {
+        return finish_siege(state, loc, msgs);
+    }
+    const remain = state.siege.days_remaining;
+    msgs.push(`守军仍有 ${state.siege.garrison} 人，还需 ${remain} 天。`);
+    const msg = msgs.join("");
+    state.add_log(msg);
+    return msg;
+}
+/** 强攻：立即破城，但兵力损失更大。 */
+export function assault_siege(state: any): string {
+    if (!state.siege) return `当前没有进行中的攻城战。`;
+    const loc = get_location(state, state.siege.location_id);
+    const heavy_loss = Math.min(Math.floor((Object.values(state.troops) as number[]).reduce((a, b) => a + b, 0) * 0.25) + 5, 40);
+    state.troops = apply_casualties(state.troops, heavy_loss);
+    return finish_siege(state, loc, [`强攻！你方损失 ${heavy_loss} 人，一举破城。`]);
+}
+/** 撤退：放弃围城。 */
+export function retreat_siege(state: any): string {
+    if (!state.siege) return `当前没有进行中的攻城战。`;
+    const loc = get_location(state, state.siege.location_id);
+    const msg = `你从 [${loc?.name ?? ""}] 撤军，围城失败。`;
+    state.siege = null;
+    state.add_log(msg);
+    return msg;
+}
+/** 攻城胜利结算：归属王国、声望、好感、封地。 */
+function finish_siege(state: any, loc: any, msgs: string[]): string {
+    const loc_id = loc.id;
+    const oldK = kingdom_of_location(loc);
+    loc.owner = state.vassal_of;
+    loc.faction_id = state.vassal_of;
+    state.renown = (state.renown ?? 0) + 30;
+    if (oldK) {
+        state.faction_relations[oldK] = (state.faction_relations[oldK] ?? 0) - 15;
+    }
+    state.faction_relations[state.vassal_of] = (state.faction_relations[state.vassal_of] ?? 0) + 10;
+    // 40% 概率国王封地给封臣
+    let fief_msg = "";
+    if (Math.random() < 0.4 && !state.fiefs.includes(loc_id)) {
+        state.fiefs.push(loc_id);
+        loc.owner = "player";
+        fief_msg = `国王将 [${loc.name}] 封赏给你作为领地！`;
+    } else {
+        fief_msg = `[${loc.name}] 归入己方王国版图。`;
+    }
+    state.siege = null;
+    const msg = msgs.join("") + ` 攻陷 [${loc.name}]！声望 +30。` + fief_msg;
+    state.add_log(msg);
+    return msg;
+}
 /** 向八王国宣誓效忠，成为其封臣。 */
 export function swear_fealty(state: any, kingdom_id: string): string {
     if (state.is_king) {
