@@ -3,7 +3,7 @@ import {
   get_map_locations, plan_travel_path, travel_eta_days,
   get_current_location, compute_content_bounds, nearest_location_id,
   FREE_MOVE_SPEED, FREE_MOVE_DAY_DISTANCE,
-  resolve_combat_simple,
+  trigger_battle, power_to_enemy_troops,
 } from "../core/engine";
 import { TERRAIN_COLORS, get_region } from "../core/world_regions";
 import type { GameState } from "../core/state";
@@ -50,6 +50,7 @@ interface WorldMapCanvasProps {
   onFreeMove?: (dist: number, onRoad: boolean) => void;
   onUnitPicked?: (unit: MapUnit) => void;
   onUnitCombat?: (enemyPower: number, desc: string) => void; // 打移动劫匪/攻城
+  onStartBattle?: (enemyTroops: Record<string, number>, desc: string) => void; // 3D 战斗入口
   onUnitInteract?: (unit: MapUnit) => void;   // 商队交易/NPC聊天（壳）
   onPassBattle?: (garrison: number) => void;   // 关隘守军战斗（修死按钮）
   onCamp?: () => void;                          // 扎营（修死按钮）
@@ -68,7 +69,7 @@ function lerpPt(a: { x: number; y: number }, b: { x: number; y: number }, t: num
 }
 
 // === 主组件 ===
-export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onUnitInteract, onPassBattle, onCamp, onSiege, onJoinArmy, onLeaveArmy }: WorldMapCanvasProps) {
+export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onStartBattle, onUnitInteract, onPassBattle, onCamp, onSiege, onJoinArmy, onLeaveArmy }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -881,11 +882,20 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {selUnit.type === "bandit" && (
-              <button className="wmc-btn wmc-btn-danger" onClick={() => onUnitCombat?.(10, `遭遇 ${selUnit.name}`)}>交战</button>
+              <button className="wmc-btn wmc-btn-danger" onClick={() => {
+                // 盗匪：按敌方战力折算成 3D 战场部队
+                const enemyTroops = power_to_enemy_troops(10);
+                if (onStartBattle) onStartBattle(enemyTroops, `遭遇 ${selUnit.name}`);
+                else onUnitCombat?.(10, `遭遇 ${selUnit.name}`);
+              }}>交战</button>
             )}
             {selUnit.type === "army" && (
               <>
-                <button className="wmc-btn" onClick={() => onUnitCombat?.(15, `与 ${selUnit.name} 交战`)}>交战</button>
+                <button className="wmc-btn" onClick={() => {
+                  const enemyTroops = power_to_enemy_troops(15);
+                  if (onStartBattle) onStartBattle(enemyTroops, `与 ${selUnit.name} 交战`);
+                  else onUnitCombat?.(15, `与 ${selUnit.name} 交战`);
+                }}>交战</button>
                 {state.vassal_of && selUnit.factionKey === state.vassal_of && !state.joined_army && (
                   <button className="wmc-btn" onClick={() => onJoinArmy?.(selUnit.id)}>加入军团</button>
                 )}
