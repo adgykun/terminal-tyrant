@@ -81,6 +81,7 @@ import {
     setRelation,
     activeWars,
 } from "./diplomacy.js";
+import { lordsDailyUpdate, ensureLords, defeatLord } from "./lords_system.js";
 
 let _quest_id_counter = 1;
 
@@ -595,6 +596,8 @@ export function daily_update(state: any): string {
         siege_daily_progress(state);
     }
     ai_siege_daily_progress(state);
+    // 0.0b 领主个人部队恢复（被俘/阵亡者不恢复）
+    lordsDailyUpdate(state);
     for (const loc_id of Object.keys(LOCATIONS)) {
         generate_quests(loc_id);
     }

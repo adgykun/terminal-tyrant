@@ -13,13 +13,15 @@
 export interface BattleReport {
   unitId: string;
   won: boolean;
+  /** 若这场仗对付的是某位具名领主，记录其 id。 */
+  lordId?: string;
 }
 
 let queue: BattleReport[] = [];
 
 /** 提交一次战斗结果（App 层调用）。 */
-export function reportBattle(unitId: string, won: boolean): void {
-  queue.push({ unitId, won });
+export function reportBattle(unitId: string, won: boolean, lordId?: string): void {
+  queue.push({ unitId, won, lordId });
 }
 
 /** 取出并清空全部待处理战报（地图层调用）。 */
