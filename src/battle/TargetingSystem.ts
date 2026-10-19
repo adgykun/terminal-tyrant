@@ -127,6 +127,20 @@ export class TargetingSystem extends System {
       const dz = tp.z - p.z;
       const atk = u.getComponent(Attack)!;
       const ms = u.getComponent(MoveSpeed)!.value;
+      if (atk.ranged) {
+        // 远程单位：进入射程即站定射击（不再后撤，避免无限风筝导致战斗无法结束）
+        const dist = Math.hypot(dx, dz);
+        const ideal = atk.range * 0.85;
+        if (dist <= ideal) {
+          v.vx = 0;
+          v.vz = 0;
+        } else {
+          const len = dist || 1;
+          v.vx = (dx / len) * ms;
+          v.vz = (dz / len) * ms;
+        }
+        continue;
+      }
       const inRange = Math.abs(dx) <= atk.range && Math.abs(dz) <= TargetingSystem.LOCK_TOL;
       if (inRange) {
         v.vx = 0;

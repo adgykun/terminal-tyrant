@@ -69,9 +69,13 @@ export class RenderSystem extends System {
   private lastY = 0;
   private pinchDist = 0;
   // ===== 镜头震动（玩家攻击命中时触发） =====
-  private shakeTime = 0;
-  private static readonly SHAKE_DURATION = 0.25;
+  private shakeTime = 0;  private static readonly SHAKE_DURATION = 0.25;
   private static readonly SHAKE_AMPLITUDE = 0.35;
+  // ===== 攻城战场景 =====
+  private siegeGate: THREE.Mesh | null = null;
+  private siegeGateOpen = false;
+  private siegeGateOpenT = 0;
+  private siegeGateMat: THREE.MeshBasicMaterial | null = null;
   // ===== 模型 / 动画配置 =====
   /** 超过此距离（世界单位）的单位不再更新动画，用静态姿势。 */
   private static readonly DISTANCE_CULL = 50;
@@ -137,9 +141,105 @@ export class RenderSystem extends System {
     this.container.addEventListener("touchend", this.onTouchEnd);
   }
 
+  /**
+   * 搭建攻城战场：左右两段城墙 + 两座塔楼 + 中间可破坏的城门。
+   * 只应在战斗初始化时调用一次。
+   */
+  enableSiege(cfg: { gateX: number; gateZ: number; gateHalfWidth: number; wallHalfWidth: number }): void {
+    const { gateX, gateZ, gateHalfWidth, wallHalfWidth } = cfg;
+    const wallH = 6.5;
+    const wallD = 1.6;
+    const wallMat = new THREE.MeshBasicMaterial({ color: 0x6b6257 });
+
+    // 左右两段城墙（门洞两侧）
+    const segW = wallHalfWidth - gateHalfWidth;
+    for (const sign of [-1, 1]) {
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(segW, wallH, wallD), wallMat);
+      seg.position.set(gateX + sign * (gateHalfWidth + segW / 2), wallH / 2, gateZ);
+      this.scene.add(seg);
+      // 墙顶垛口（视觉提示：这是可守的墙）
+      const crenel = new THREE.Mesh(
+        new THREE.BoxGeometry(segW, 0.7, wallD + 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x585047 }),
+      );
+      crenel.position.set(seg.position.x, wallH + 0.35, gateZ);
+      this.scene.add(crenel);
+      // 塔楼
+      const tower = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, wallH + 2.4, 3.2),
+        new THREE.MeshBasicMaterial({ color: 0x7a7065 }),
+      );
+      tower.position.set(gateX + sign * wallHalfWidth, (wallH + 2.4) / 2, gateZ);
+      this.scene.add(tower);
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(2.6, 2.2, 4),
+        new THREE.MeshBasicMaterial({ color: 0x8a4a3a }),
+      );
+      roof.position.set(tower.position.x, wallH + 2.4 + 1.1, gateZ);
+      roof.rotation.y = Math.PI / 4;
+      this.scene.add(roof);
+    }
+
+    // 门楣（门洞上方的墙体）
+    const lintelH = wallH - 4.2;
+    if (lintelH > 0) {
+      const lintel = new THREE.Mesh(
+        new THREE.BoxGeometry(gateHalfWidth * 2, lintelH, wallD),
+        wallMat,
+      );
+      lintel.position.set(gateX, 4.2 + lintelH / 2, gateZ);
+      this.scene.add(lintel);
+    }
+
+    // 城门本体（可破坏：破门后下沉）
+    const gateMat = new THREE.MeshBasicMaterial({ color: 0x6b4a2a });
+    const gate = new THREE.Mesh(new THREE.BoxGeometry(gateHalfWidth * 2, 4.2, 0.9), gateMat);
+    gate.position.set(gateX, 2.1, gateZ);
+    this.scene.add(gate);
+    this.siegeGate = gate;
+    this.siegeGateMat = gateMat;
+    this.siegeGateOpen = false;
+    this.siegeGateOpenT = 0;
+
+    // 门前空地色块：标出进攻方集结区
+    const apron = new THREE.Mesh(
+      new THREE.PlaneGeometry(gateHalfWidth * 2 + 6, 9),
+      new THREE.MeshBasicMaterial({ color: 0x3a3228, side: THREE.DoubleSide }),
+    );
+    apron.rotation.x = -Math.PI / 2;
+    apron.position.set(gateX, 0.02, gateZ + 5.5);
+    this.scene.add(apron);
+  }
+
+  /** 城门耐久变化（0..1）：颜色由木色渐变为焦黑。 */
+  setGateDamage(frac: number): void {
+    if (!this.siegeGateMat) return;
+    const f = Math.max(0, Math.min(1, frac));
+    // 完好 = 0x6b4a2a；受损 = 深褐 → 焦黑
+    const r = Math.round(0x6b * (0.35 + f * 0.65));
+    const g = Math.round(0x4a * (0.3 + f * 0.7));
+    const b = Math.round(0x2a * (0.25 + f * 0.75));
+    this.siegeGateMat.color.setRGB(r / 255, g / 255, b / 255);
+  }
+
+  /** 破门：城门开始下沉。 */
+  openGate(): void {
+    this.siegeGateOpen = true;
+  }
+
+  /** 城门开启动画（每帧）。 */
+  private updateSiegeVisual(dt: number): void {
+    if (!this.siegeGate || !this.siegeGateOpen) return;
+    if (this.siegeGateOpenT >= 1) return;
+    this.siegeGateOpenT = Math.min(1, this.siegeGateOpenT + dt * 0.8);
+    // 下沉 + 后倒，模拟被砸塌
+    this.siegeGate.position.y = 2.1 - this.siegeGateOpenT * 4.0;
+    this.siegeGate.rotation.x = -this.siegeGateOpenT * (Math.PI / 2.2);
+  }
+
   update(dt: number): void {
-    this.updateFocus(dt);
-    if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
+    this.updateFocus(dt);    if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
+    this.updateSiegeVisual(dt);
     const alive = new Set<number>();
     const camPos = this.camera.position;
     for (const e of this.world.query(Position, Team, Visual)) {
@@ -190,6 +290,11 @@ export class RenderSystem extends System {
     });
     for (const unit of this.units.values()) this.disposeUnit(unit);
     this.units.clear();
+    // 清理攻城场景网格
+    this.siegeGate = null;
+    this.siegeGateMat = null;
+    this.siegeGateOpen = false;
+    this.siegeGateOpenT = 0;
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

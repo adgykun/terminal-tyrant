@@ -56,14 +56,17 @@ export class CombatSystem extends System {
     }
   }
 
-  /** 距离判定：x 在攻击范围内、z 在容忍宽度内 → 视为接触。 */
+  /** 距离判定：近战看 x 轴向 + z 容忍；远程按欧氏距离。 */
   private inContact(a: Entity, b: Entity): boolean {
     const pa = a.getComponent(Position)!;
     const pb = b.getComponent(Position)!;
     const dx = Math.abs(pa.x - pb.x);
     const dz = Math.abs(pa.z - pb.z);
-    const range = a.getComponent(Attack)!.range;
-    return dx <= range && dz <= CombatSystem.Z_TOLERANCE;
+    const atk = a.getComponent(Attack)!;
+    if (atk.ranged) {
+      return Math.hypot(dx, dz) <= atk.range;
+    }
+    return dx <= atk.range && dz <= CombatSystem.Z_TOLERANCE;
   }
 
   /** 出手：冷却完毕则扣血；返回目标是否因此阵亡。 */
