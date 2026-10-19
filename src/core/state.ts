@@ -57,6 +57,8 @@ export interface GameStateData {
     government_bonds?: any[];
     available_futures?: any[];
     available_bonds?: any[];
+    /** 外交内核状态（运行时演化，随存档持久化）。 */
+    diplomacy?: any;
 }
 
 /** 管理游戏世界的持久化状态数据结构。 */

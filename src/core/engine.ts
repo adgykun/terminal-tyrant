@@ -72,6 +72,15 @@ import {
     SCAVENGE_AMBUSH_TEXTS,
 } from "./dialogues.js";
 import { get_formatted_npc_dialogue, get_dialogue } from "./dialogue_engine.js";
+import {
+    ensureDiplomacy,
+    tickDiplomacy,
+    syncKingdomStats,
+    isAtWar,
+    getRelation,
+    setRelation,
+    activeWars,
+} from "./diplomacy.js";
 
 let _quest_id_counter = 1;
 
@@ -227,7 +236,7 @@ export function add_log(state: any, event_text: string): void {
     }
 }
 
-/** 每日结算：更新势力之间的动态关系。 */
+/** 每日结算：更新势力之间的动态关系（外交内核驱动）。 */
 export function update_faction_relations(state: any): void {
     // 只让八王国主键参与外交（排除 rf1-rf6 别名）
     const KINGDOM_IDS = ["empire_n", "empire_w", "empire_s", "sturgia", "aserai", "vlandia", "battania", "khuzait"];
@@ -236,90 +245,82 @@ export function update_faction_relations(state: any): void {
         return;
     }
 
-    // 玩家视角关系表（state.faction_relations）与静态 FACTIONS.relations 双向同步
-    // 若玩家曾宣战/停战，FACTIONS 静态表也要跟着变（否则 AI 演化会用旧关系）
+    // ── 外交内核：取代原先「10% 概率掷骰子宣战/停战」 ──
+    const dip = ensureDiplomacy(state);
+    const nameOf = (id: string) => (FACTIONS[id]?.name as string) ?? id;
+
+    // 1. 同步各国实力与据点数，供外交评分使用
+    const stats: Record<string, { fiefCount: number; strength: number }> = {};
+    for (const id of f_ids) {
+        let fiefCount = 0;
+        for (const loc of Object.values(LOCATIONS) as any[]) {
+            const k = RF_TO_KINGDOM[loc.faction_id] || loc.faction_id;
+            if (k === id) fiefCount++;
+        }
+        stats[id] = { fiefCount, strength: 60 + fiefCount * 25 };
+    }
+    syncKingdomStats(dip, stats);
+
+    // 2. 玩家与各国关系仍由 state.faction_relations 表达：敌对则写入外交表
     if (state.faction_relations) {
         for (const kid of KINGDOM_IDS) {
             const pr = state.faction_relations[kid];
-            if (pr === undefined) continue;
-            // 玩家设置过且与静态不同 → 回写静态表（全双向）
+            if (pr === undefined || pr >= 0) continue;
             for (const other of KINGDOM_IDS) {
                 if (other === kid) continue;
-                // 玩家单边宣战某国，也反映为双向敌对
-                if (pr < 0) {
-                    FACTIONS[kid].relations[other] = Math.min(FACTIONS[kid].relations[other] ?? 0, -20);
-                    FACTIONS[other].relations[kid] = Math.min(FACTIONS[other].relations[kid] ?? 0, -20);
-                } else if (pr >= 0) {
-                    const orig = FACTIONS[kid].relations[other] ?? 0;
-                    if (orig < 0) {
-                        FACTIONS[kid].relations[other] = 0;
-                        FACTIONS[other].relations[kid] = 0;
-                    }
+                const otherRel = state.faction_relations[other];
+                // 仅当双方都不友好时才视为开战，避免玩家单方情绪扩散全球
+                if (otherRel !== undefined && otherRel < 0) {
+                    if (getRelation(dip, kid, other) > -20) setRelation(dip, kid, other, -25);
                 }
             }
         }
     }
 
-    const [f1_id, f2_id] = randomSample(f_ids, 2);
-    if (Math.random() < 0.10) {
-        const rel = FACTIONS[f1_id].relations[f2_id] ?? 0;
-        let msg = "";
-        if (rel < 0) {
-            FACTIONS[f1_id].relations[f2_id] = 20;
-            FACTIONS[f2_id].relations[f1_id] = 20;
-            if (state.faction_relations) {
-                state.faction_relations[f1_id] = Math.max(0, state.faction_relations[f1_id] ?? 0);
-                state.faction_relations[f2_id] = Math.max(0, state.faction_relations[f2_id] ?? 0);
-            }
-            msg = `【势力外交】${FACTIONS[f1_id].name} 与 ${FACTIONS[f2_id].name} 达成了停战协议！`;
-        } else {
-            FACTIONS[f1_id].relations[f2_id] = -50;
-            FACTIONS[f2_id].relations[f1_id] = -50;
-            if (state.faction_relations) {
-                state.faction_relations[f1_id] = Math.min(-20, state.faction_relations[f1_id] ?? 0);
-                state.faction_relations[f2_id] = Math.min(-20, state.faction_relations[f2_id] ?? 0);
-            }
-            msg = `【势力外交】${FACTIONS[f1_id].name} 向 ${FACTIONS[f2_id].name} 正式宣战！`;
-        }
-        state.add_log(msg);
+    // 3. 推进外交一天
+    const tick = tickDiplomacy(dip, state.day ?? 0, nameOf);
+    for (const d of tick.declared) {
+        state.add_log(`【势力外交】${nameOf(d.attacker)} 向 ${nameOf(d.defender)} 宣战！（${d.reasons.join("、") || "扩张野心"}）`);
+    }
+    for (const p of tick.peaced) {
+        state.add_log(`【势力外交】${nameOf(p.a)} 与 ${nameOf(p.b)} 停战（${p.reasons.join("、") || "双方力竭"}）。`);
     }
 
-    // AI 王国围城事件：敌国大军自动围攻一座城镇（世界动态，玩家可旁观）
-    if (Math.random() < 0.06) {
-        const atWarPairs: [string, string][] = [];
-        for (const a of f_ids) {
-            for (const b of f_ids) {
-                if (a >= b) continue;
-                if ((FACTIONS[a].relations[b] ?? 0) < 0) atWarPairs.push([a, b]);
-            }
+    // 4. 外交结果写回静态 FACTIONS 关系表（兼容旧代码读取）
+    for (const a of f_ids) {
+        for (const b of f_ids) {
+            if (a === b) continue;
+            FACTIONS[a].relations[b] = Math.round(getRelation(dip, a, b));
         }
-        if (atWarPairs.length > 0) {
-            const [atk, def] = randomChoice(atWarPairs);
-            // 找防御方领地
+    }
+
+    // 5. AI 围城：由真实交战配对驱动，强度随实力差变化
+    if (Math.random() < 0.14) {
+        const warPairs = activeWars(dip).filter(([a, b]) => f_ids.includes(a) && f_ids.includes(b));
+        if (warPairs.length > 0) {
+            const [x, y] = randomChoice(warPairs);
+            const sx = dip.kingdoms[x]?.strength ?? 100;
+            const sy = dip.kingdoms[y]?.strength ?? 100;
+            const atk = sx >= sy ? x : y;
+            const def = atk === x ? y : x;
             const defLocs = Object.values(LOCATIONS).filter((l: any) => {
                 const k = RF_TO_KINGDOM[l.faction_id] || l.faction_id;
                 return k === def;
             });
             if (defLocs.length > 0) {
-                const target = randomChoice(defLocs);
-                // 已在围城中则不重复登记
-                const existing = (state.ai_sieges ?? []).some((x: any) => x.location_id === target.id);
+                const target: any = randomChoice(defLocs);
+                const existing = (state.ai_sieges ?? []).some((s: any) => s.location_id === target.id);
                 if (!existing) {
-                    const threat = {
-                        location_id: target.id,
-                        attacker: atk,
-                        defender: def,
-                        days_remaining: 3 + Math.floor(Math.random() * 3), // 3~5 天响应窗口
-                        strength: 40 + Math.floor(Math.random() * 61),      // 40~100 攻方兵力
-                    };
+                    const ratio = sx / Math.max(1, sy);
+                    const strength = Math.max(25, Math.min(140, Math.round(45 * ratio)));
+                    const days = Math.max(2, Math.min(7, Math.round(4 / Math.max(0.5, ratio) + 1)));
                     state.ai_sieges = state.ai_sieges ?? [];
-                    state.ai_sieges.push(threat);
-                    const newsMsg = `【战场情报】${FACTIONS[atk].name} 大军正在围攻 ${FACTIONS[def].name} 的 [${target.name}]！${threat.days_remaining} 天内可前往支援或守城。`;
-                    state.add_log(newsMsg);
+                    state.ai_sieges.push({ location_id: target.id, attacker: atk, defender: def, days_remaining: days, strength });
+                    state.add_log(`【战场情报】${nameOf(atk)} 大军（${strength} 兵力）围攻 ${nameOf(def)} 的 [${target.name}]！${days} 天内可驰援或守城。`);
                     if (state.location === target.id) {
-                        state.add_log(`⚠ 你所在的城市 [${target.name}] 正被围攻！可在城镇面板迎战守军。`);
+                        state.add_log(`⚠ 你所在的城市 [${target.name}] 正被围攻！可在城镇面板迎战。`);
                     }
-                    if (state.fiefs.includes(target.id)) {
+                    if ((state.fiefs ?? []).includes(target.id)) {
                         state.add_log(`⚠ 你的封地 [${target.name}] 正被围攻！请尽快驰援。`);
                     }
                 }

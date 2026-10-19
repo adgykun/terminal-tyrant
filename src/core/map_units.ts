@@ -198,41 +198,31 @@ function assignTarget(u: MapUnit, usable: any[], rnd: () => number) {
   u.dwell = 0;
 }
 
-// 军团遭遇敌国军团：近距则"交战"（弱方溃散移出视野，强方留驻），返回战斗描述
-function resolveArmyClashes(units: MapUnit[]): string[] {
-  const msgs: string[] = [];
-  const armies = units.filter((u) => u.type === "army" && u.factionKey);
-  for (let i = 0; i < armies.length; i++) {
-    for (let j = i + 1; j < armies.length; j++) {
-      const a = armies[i], b = armies[j];
-      if (!a.factionKey || !b.factionKey) continue;
-      if (a.factionKey === b.factionKey) continue;
-      const relA = KINGDOM_REL[a.factionKey]?.[b.factionKey] ?? 0;
-      const relB = KINGDOM_REL[b.factionKey]?.[a.factionKey] ?? 0;
-      if (relA >= 0 || relB >= 0) continue;
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d > 0.9) continue;
-      const pa = Object.entries(a.troops || {}).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number), 0);
-      const pb = Object.entries(b.troops || {}).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number), 0);
-      const loser = pa >= pb ? b : a;
-      const winner = loser === a ? b : a;
-      loser.x = 999; loser.y = 999; // 视作溃散
-      winner.dwell = 4; // 战后停留
-      msgs.push(`${loser.name} 被 ${winner.name} 击溃！`);
-    }
-  }
-  return msgs;
-}
+// 军团遭遇战已迁移到 lord_ai.ts 的 advanceArmies（真实减员 + 撤退 + 全歼判定）。
+// 旧的 resolveArmyClashes 会把败方坐标设为 999 使其凭空消失，已移除。
+
 // 每帧推进（就地修改 units，返回军团战斗消息）
+//
+// 注意：军团行为已迁移到 lord_ai.ts（意图驱动：驻防/驰援/围城/劫掠/撤退/追击），
+// 遭遇战也由 lord_ai 处理（真实减员，不再把坐标设为 999 让单位凭空消失）。
+// 本函数现在只负责 商队 / 劫匪 / NPC 等非军团单位的简单游走，
+// 军团部分的推进请调用 advanceArmies。
 export function advanceUnits(
   units: MapUnit[],
   dt: number,
   usable: any[],
   seed: number
 ): string[] {
-  const clashMsgs = resolveArmyClashes(units);
+  const msgs: string[] = [];
   const rnd = Math.random;
   for (const u of units) {
+    // 军团由 lord_ai.advanceArmies 驱动
+    if (u.type === "army") continue;
+    // 已被歼灭（兵力归零）的单位跳过
+    if (u.troops) {
+      const total = Object.values(u.troops).reduce((s, n) => s + n, 0);
+      if (total <= 0) continue;
+    }
     if (u.dwell > 0) {
       u.dwell -= dt;
       if (u.dwell <= 0) assignTarget(u, usable, rnd);
@@ -241,7 +231,6 @@ export function advanceUnits(
     const dx = u.targetX - u.x, dy = u.targetY - u.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.6) {
-      // 到达：停留 2-5 秒再换目标
       u.dwell = 2 + rnd() * 3;
       continue;
     }
@@ -249,5 +238,5 @@ export function advanceUnits(
     u.x += (dx / d) * step;
     u.y += (dy / d) * step;
   }
-  return clashMsgs;
+  return msgs;
 }
