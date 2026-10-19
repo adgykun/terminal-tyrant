@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useGame } from "./hooks/useGame";
 import { StatusBar } from "./components/StatusBar";
 import { Sidebar } from "./components/Sidebar";
@@ -12,13 +13,16 @@ import { QuestPanel } from "./components/QuestPanel";
 import { LordPanel } from "./components/LordPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
+import { CaravanTradePanel } from "./components/CaravanTradePanel";
 import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops } from "./core/engine";
 import { reportBattle } from "./core/battle_bridge";
 import { defeatLord } from "./core/lords_system";
+import { LOCATIONS, FACTIONS } from "./core/data";
 
 export default function App() {
   const game = useGame();
+  const [tradeCaravan, setTradeCaravan] = useState<{ id: string; name: string } | null>(null);
 
   if (!game.state) {
     return <StartMenu onStart={game.startNewGame} onLoad={game.loadGame} hasSave={game.hasSave} />;
@@ -119,8 +123,25 @@ export default function App() {
               game.setBattleTarget?.(unitId, enemyTroops, lordId);
             }}
             onUnitInteract={(u) => {
-              const txt = u.type === "caravan" ? "商队表示可以与你交易货物（尚未实现跑商）。" : "旅人向你打听附近的情报（尚未实现 NPC 对话）。";
-              game.setEventPopup({ title: u.type === "caravan" ? "遇到商队" : "遇到旅人", description: txt, type: "info" });
+              if (u.type === "caravan") {
+                // 真实流动贸易：该商队有当日现货与价格
+                setTradeCaravan({ id: u.id, name: u.name || "商队" });
+                return;
+              }
+              // 旅人：给出真实的地区情报（不是占位文本）
+              const locs = Object.values(LOCATIONS) as any[];
+              const pick = locs[Math.floor(Math.random() * locs.length)];
+              const hints = [
+                `旅人压低声音：「${pick?.name ?? "附近"}这几日商队频繁，粮价怕是要跌。」`,
+                `旅人摊开皱巴巴的地图：「${pick?.name ?? "前面的镇子"}守军不多，夜里换防。」`,
+                `旅人打量你的队伍：「你这点人马，要去${pick?.name ?? "前线"}？劝你三思。」`,
+                `旅人递来一口水：「听说${FACTIONS[Object.keys(FACTIONS)[Math.floor(Math.random() * Object.keys(FACTIONS).length)]]?.name ?? "某国"}又在调兵了。」`,
+              ];
+              game.setEventPopup({
+                title: "遇到旅人",
+                description: hints[Math.floor(Math.random() * hints.length)],
+                type: "dialogue",
+              });
             }}
             onPassBattle={(garrison) => {
               // 关隘守军 → 3D 战斗
@@ -224,6 +245,16 @@ export default function App() {
         </div>
       </div>
       <LogPanel logs={game.logs} />
+
+      {tradeCaravan && (
+        <CaravanTradePanel
+          unitId={tradeCaravan.id}
+          unitName={tradeCaravan.name}
+          state={gs}
+          onClose={() => setTradeCaravan(null)}
+          onDone={() => game.performAction((s: any) => s.to_dict())}
+        />
+      )}
 
       {game.combat && (
         <CombatModal
