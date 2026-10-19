@@ -24,6 +24,8 @@ const TRAVEL_SPEED = 10; // 世界单位/秒
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 5;
 const HIT_RADIUS = 3; // 世界单位
+const INTERACT_RANGE = 4.5; // E/F 键就近交互半径（世界单位）
+const NEARBY_RANGE = 18;    // 「附近队伍」列表显示半径（世界单位）
 const FACTION_COLORS: Record<string, string> = {
   rf1: "#4a90d9", rf2: "#5cb85c", rf3: "#c0392b", rf4: "#a855f7",
   f1: "#4a90d9", f2: "#5cb85c", f3: "#c0392b", f4: "#a855f7",
@@ -125,6 +127,9 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
   const [physicalSize, setPhysicalSize] = useState({ w: 0, h: 0 });
   const [dayToast, setDayToast] = useState(0);
   const [clashToast, setClashToast] = useState<string[]>([]);
+  /** 附近队伍（骑砍式"附近队伍"列表，周期性刷新）。 */
+  const [nearbyUnits, setNearbyUnits] = useState<Array<{ id: string; name: string; type: string; dist: number }>>([]);
+  const nearbyTickRef = useRef(0);
 
   // 地点缓存
   const locations = get_map_locations(state);
@@ -428,6 +433,32 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
           const otherMsgs = advanceUnits(unitsRef.current, dt, usable, 0);
           if (otherMsgs.length > 0) {
             setClashToast((prev) => [...prev.slice(-2), ...otherMsgs]);
+          }
+
+          // 附近队伍列表：每 ~0.5 秒刷新一次
+          {
+            nearbyTickRef.current += dt;
+            if (nearbyTickRef.current >= 0.5) {
+              nearbyTickRef.current = 0;
+              const pp = playerPosRef.current;
+              const list = unitsRef.current
+                .map((u) => ({
+                  id: u.id,
+                  name: u.name,
+                  type: u.type,
+                  dist: Math.hypot(u.x - pp.x, u.y - pp.y),
+                }))
+                .filter((u) => u.dist <= NEARBY_RANGE)
+                .sort((a, b) => a.dist - b.dist)
+                .slice(0, 6);
+              setNearbyUnits((prev) => {
+                if (prev.length === list.length &&
+                    prev.every((p, i) => p.id === list[i].id && Math.abs(p.dist - list[i].dist) < 0.2)) {
+                  return prev;
+                }
+                return list;
+              });
+            }
           }
 
           // ── 玩家与敌军接触 → 自动开战（骑砍式遭遇） ──
@@ -917,12 +948,27 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         e.preventDefault();
       }
       if (e.key === "Escape") cancelTravel();
+      // E / F：与附近单位交互（骑砍式就近交互，免去像素级点选）
+      if (e.key === "e" || e.key === "E" || e.key === "f" || e.key === "F") {
+        const p = playerPosRef.current;
+        let best: MapUnit | null = null;
+        let bestD = INTERACT_RANGE;
+        for (const u of unitsRef.current) {
+          const d = Math.hypot(u.x - p.x, u.y - p.y);
+          if (d < bestD) { bestD = d; best = u; }
+        }
+        if (best) {
+          setSelUnit(best);
+          if (best.type === "caravan" || best.type === "npc") onUnitInteract?.(best);
+          else onUnitPicked?.(best);
+        }
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => { keysRef.current[e.key] = false; };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [cancelTravel]);
+  }, [cancelTravel, onUnitInteract, onUnitPicked]);
 
   // === 小地图（右下角缩略）===
   useEffect(() => {
@@ -1003,6 +1049,40 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
         <div className="wmc-travel-bar">
           <span>{travelMode === "free" ? "自由行军" : `官道路径 · ${etaDays} 天`}</span>
           <button className="wmc-btn-sm" onClick={cancelTravel}>取消</button>
+        </div>
+      )}
+
+      {/* 附近队伍（骑砍式）：点击即可交互，无需精确点选 token */}
+      {nearbyUnits.length > 0 && (
+        <div style={{
+          position: "absolute", right: 8, top: 8, zIndex: 22,
+          background: "rgba(16,22,32,0.9)", border: "1px solid #3a4557",
+          borderRadius: 8, padding: "7px 9px", minWidth: 150, fontSize: 11, color: "#ddd",
+        }}>
+          <div style={{ color: "var(--accent-gold)", marginBottom: 5, fontSize: 11 }}>附近队伍</div>
+          {nearbyUnits.map((u) => (
+            <div
+              key={u.id}
+              onClick={() => {
+                const hit = unitsRef.current.find((x) => x.id === u.id);
+                if (!hit) return;
+                setSelUnit(hit);
+                if (hit.type === "caravan" || hit.type === "npc") onUnitInteract?.(hit);
+                else onUnitPicked?.(hit);
+              }}
+              style={{
+                display: "flex", justifyContent: "space-between", gap: 8,
+                padding: "3px 2px", cursor: "pointer", borderBottom: "1px solid #222a36",
+              }}
+            >
+              <span style={{
+                color: u.type === "caravan" ? "#d9a441"
+                  : u.type === "bandit" ? "#c0392b"
+                  : u.type === "npc" ? "#6fa8a0" : "#8aa",
+              }}>{u.name}</span>
+              <span style={{ color: "#667" }}>{u.dist.toFixed(1)}</span>
+            </div>
+          ))}
         </div>
       )}
 
