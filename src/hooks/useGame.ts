@@ -13,6 +13,7 @@ export type GameView =
   | "inventory"
   | "quests"
   | "kingdom"
+  | "lords"
   | "logs"
   | "battle";
 
