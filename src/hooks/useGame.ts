@@ -38,6 +38,8 @@ export interface BattleEnemy {
   sourceUnitId?: string;
   /** 若该军团由某位具名领主统率，记录其 id，战胜后可俘获。 */
   sourceLordId?: string;
+  /** 攻城战信息（有值则战场进入攻城模式）。 */
+  siege?: { name: string; gateHp: number; garrison: number };
 }
 const SAVE_KEY = "terminal_tyrant_save";
 export function useGame() {
@@ -147,7 +149,26 @@ export function useGame() {
         description: prev?.description ?? "",
         sourceUnitId: unitId,
         sourceLordId: lordId,
+        siege: prev?.siege,
       }));
+    },
+    [],
+  );
+
+  /** 开启 3D 攻城战。 */
+  const startSiegeBattle = useCallback(
+    (defenders: Record<string, number>, name: string, garrison: number) => {
+      setCombat(null);
+      setEventPopup(null);
+      // 城门耐久随守军规模增加，但设上限避免拖太久
+      const gateHp = Math.min(520, 220 + garrison * 4);
+      setBattleEnemy({
+        enemyTroops: defenders,
+        enemyPower: garrison * 10,
+        description: `强攻 ${name}`,
+        siege: { name, gateHp, garrison },
+      });
+      setView("battle");
     },
     [],
   );
@@ -176,6 +197,7 @@ export function useGame() {
     setBattleEnemy,
     startBattle,
     setBattleTarget,
+    startSiegeBattle,
     startNewGame,
     loadGame,
     hasSave,
