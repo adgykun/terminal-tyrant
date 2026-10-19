@@ -9,6 +9,7 @@ import { TERRAIN_COLORS, get_region } from "../core/world_regions";
 import type { GameState } from "../core/state";
 import { generateTerrainCanvas, type TerrainLayer } from "../core/terrain_noise";
 import { generateMapUnits, advanceUnits, RF_TO_KINGDOM, KINGDOM_REL, type MapUnit } from "../core/map_units";
+import { advanceArmies, pruneDestroyed } from "../core/lord_ai";
 import { BANNERLORD_TROOPS } from "../core/troops_bannerlord";
 
 function troopName(id: string): string {
@@ -302,9 +303,33 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       {
         const usable = (locations as any[]).filter((l) => typeof l.x === "number");
         if (unitsRef.current.length) {
-          const clashMsgs = advanceUnits(unitsRef.current, dt, usable, 0);
-          if (clashMsgs.length > 0) {
-            setClashToast((prev) => [...prev.slice(-2), ...clashMsgs]);
+          // 军团：由 lord_ai 意图驱动（围城/驰援/追击/撤退），遭遇战真实减员
+          const armies = advanceArmies(dt, {
+            units: unitsRef.current,
+            locations: usable,
+            isAtWar: (a, b) => (KINGDOM_REL[a]?.[b] ?? 0) < 0 || (KINGDOM_REL[b]?.[a] ?? 0) < 0,
+            troopPower: (troops) =>
+              Object.entries(troops || {}).reduce(
+                (sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number),
+                0,
+              ),
+            locKingdom: (loc) => RF_TO_KINGDOM[loc.faction_id] || loc.faction_id,
+            siegeOf: (locId) => {
+              const s = (state as any).ai_sieges as Array<{ location_id: string; attacker: string }> | undefined;
+              const hit = s?.find((x) => x.location_id === locId);
+              return hit ? hit.attacker : null;
+            },
+          });
+          if (armies.length > 0) {
+            const msgs = armies.map((r) => r.message);
+            setClashToast((prev) => [...prev.slice(-2), ...msgs]);
+            // 覆灭军团移出地图
+            unitsRef.current = pruneDestroyed(unitsRef.current);
+          }
+          // 商队/劫匪/NPC：简单游走
+          const otherMsgs = advanceUnits(unitsRef.current, dt, usable, 0);
+          if (otherMsgs.length > 0) {
+            setClashToast((prev) => [...prev.slice(-2), ...otherMsgs]);
           }
         }
       }
