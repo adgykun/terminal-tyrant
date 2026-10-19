@@ -15,7 +15,7 @@ import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
 import { CaravanTradePanel } from "./components/CaravanTradePanel";
 import { BattleView } from "./battle/BattleView";
-import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops } from "./core/engine";
+import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops, siege_defender_troops, siege_assault_victory, siege_assault_defeat } from "./core/engine";
 import { reportBattle } from "./core/battle_bridge";
 import { defeatLord } from "./core/lords_system";
 import { LOCATIONS, FACTIONS } from "./core/data";
@@ -162,10 +162,26 @@ export default function App() {
               });
             }}
             onSiege={(action, locId) => {
+              if (action === "assault") {
+                // 强攻 → 进入 3D 攻城战（城墙隔开两军，先破门）
+                const info = game.performAction((s: any) => {
+                  if (!s.siege) return null;
+                  const loc = (LOCATIONS as any)[s.siege.location_id]
+                    ?? Object.values(LOCATIONS).find((l: any) => l.id === s.siege.location_id);
+                  return {
+                    defenders: siege_defender_troops(s),
+                    name: (loc as any)?.name ?? "敌城",
+                    garrison: s.siege.garrison ?? 40,
+                  };
+                });
+                if (info) {
+                  game.startSiegeBattle(info.defenders, info.name, info.garrison);
+                }
+                return;
+              }
               const fn =
                 action === "start" ? (s: any, id: string) => start_siege(s, id)
                 : action === "advance" ? (s: any) => siege_daily_progress(s)
-                : action === "assault" ? (s: any) => assault_siege(s)
                 : (s: any) => retreat_siege(s);
               game.performAction(fn as any, locId as any);
             }}
@@ -192,9 +208,11 @@ export default function App() {
           <BattleView
             playerTroops={gs.troops}
             enemyTroops={game.battleEnemy?.enemyTroops}
+            siege={game.battleEnemy?.siege}
             onBattleEnd={(result) => {
               const targetUnitId = game.battleEnemy?.sourceUnitId;
               const targetLordId = game.battleEnemy?.sourceLordId;
+              const siegeInfo = game.battleEnemy?.siege;
               // 战斗结束：把按兵种伤亡精确写回 state.troops
               game.performAction((s: any) => {
                 const t = s.troops ?? {};
@@ -203,6 +221,16 @@ export default function App() {
                 }
                 const lost = Object.values(result.casualties as Record<string, number>)
                   .reduce((a: number, b) => a + b, 0);
+                if (siegeInfo) {
+                  // ── 攻城战结算：破城则易主，失败则溃退 ──
+                  const msg = result.won
+                    ? siege_assault_victory(s)
+                    : siege_assault_defeat(s);
+                  s.add_log?.(result.won
+                    ? `攻城成功！阵亡 ${lost} 人。`
+                    : `攻城失利，阵亡 ${lost} 人。`);
+                  return msg;
+                }
                 s.add_log?.(
                   result.won
                     ? `3D 战场大捷！阵亡 ${lost} 人，余部 ${Object.values(result.survivors as Record<string, number>).reduce((a: number, b) => a + b, 0)} 人凯旋。`
