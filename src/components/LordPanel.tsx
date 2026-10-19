@@ -20,9 +20,11 @@ import type { GameState } from "../core/state";
 interface LordPanelProps {
   state: GameState;
   performAction: (fn: (...args: any[]) => any, ...args: any[]) => any;
+  /** 点击某位领主 → 打开对话面板。 */
+  onTalk?: (lordId: string) => void;
 }
 
-export function LordPanel({ state, performAction }: LordPanelProps) {
+export function LordPanel({ state, performAction, onTalk }: LordPanelProps) {
   const rt = ensureLords(state);
 
   const rows = useMemo(() => {
@@ -83,7 +85,15 @@ export function LordPanel({ state, performAction }: LordPanelProps) {
               <tr key={lord.id} style={{ borderBottom: "1px solid #222" }}>
                 <td style={{ padding: "6px 4px" }}>
                   {lord.isRuler && <span style={{ color: "#d9a441", marginRight: 4 }}>♛</span>}
-                  {lord.name}
+                  {onTalk ? (
+                    <span
+                      onClick={() => onTalk(lord.id)}
+                      style={{ cursor: "pointer", borderBottom: "1px dotted #888" }}
+                      title="交谈"
+                    >
+                      {lord.name}
+                    </span>
+                  ) : lord.name}
                 </td>
                 <td style={{ color: "#9ab" }}>{f?.name ?? lord.kingdom}</td>
                 <td>{PERSONALITY_TRAIT[lord.personality].label}</td>
