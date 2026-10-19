@@ -16,9 +16,18 @@ import { Attack } from "./Attack";
 import { Target } from "./Target";
 import { Position } from "./Position";
 import { PlayerControl } from "./PlayerControl";
+import {
+  type TerrainField,
+  heightRangeBonus,
+  heightDamageBonus,
+  hasLineOfSight,
+} from "./Terrain";
+
 export class CombatSystem extends System {
   /** z 轴向的接触判定宽度。 */
   private static readonly Z_TOLERANCE = 1.2;
+  /** 当前战场地形（平地则不影响）。 */
+  terrain: TerrainField | null = null;
   /** 玩家出手命中时的回调（BattleView 接入 camera shake）。 */
   onPlayerAttack: (() => void) | null = null;
   constructor() {
@@ -56,7 +65,7 @@ export class CombatSystem extends System {
     }
   }
 
-  /** 距离判定：近战看 x 轴向 + z 容忍；远程按欧氏距离。 */
+  /** 距离判定：近战看 x 轴向 + z 容忍；远程按欧氏距离，并受高度加成与树林遮挡影响。 */
   private inContact(a: Entity, b: Entity): boolean {
     const pa = a.getComponent(Position)!;
     const pb = b.getComponent(Position)!;
@@ -64,17 +73,32 @@ export class CombatSystem extends System {
     const dz = Math.abs(pa.z - pb.z);
     const atk = a.getComponent(Attack)!;
     if (atk.ranged) {
-      return Math.hypot(dx, dz) <= atk.range;
+      const field = this.terrain;
+      let range = atk.range;
+      if (field) {
+        // 居高临下射得更远
+        range *= heightRangeBonus(field.heightAt(pa.x, pa.z), field.heightAt(pb.x, pb.z));
+        // 树林阻挡视线 → 无法射击
+        if (!hasLineOfSight(field, pa.x, pa.z, pb.x, pb.z)) return false;
+      }
+      return Math.hypot(dx, dz) <= range;
     }
     return dx <= atk.range && dz <= CombatSystem.Z_TOLERANCE;
   }
 
-  /** 出手：冷却完毕则扣血；返回目标是否因此阵亡。 */
+  /** 出手：冷却完毕则扣血（远程受高度加成）；返回目标是否因此阵亡。 */
   private tryAttack(attacker: Entity, target: Entity): boolean {
     const atk = attacker.getComponent(Attack)!;
     if (atk.timer > 0) return false;
     const hp = target.getComponent(Health)!;
-    hp.hp -= atk.damage;
+    let dmg = atk.damage;
+    const field = this.terrain;
+    if (field && atk.ranged) {
+      const pa = attacker.getComponent(Position)!;
+      const pb = target.getComponent(Position)!;
+      dmg *= heightDamageBonus(field.heightAt(pa.x, pa.z), field.heightAt(pb.x, pb.z));
+    }
+    hp.hp -= dmg;
     atk.timer = atk.cooldown;
     return !hp.alive;
   }

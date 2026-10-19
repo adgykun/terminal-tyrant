@@ -19,6 +19,7 @@ import { MoveSpeed } from "./MoveSpeed";
 import { PlayerControl } from "./PlayerControl";
 import { Formation } from "./Formation";
 import { Morale } from "./Morale";
+import type { TerrainField } from "./Terrain";
 
 export class TargetingSystem extends System {
   /** 与友军的最小间距（排斥半径）。 */
@@ -29,6 +30,8 @@ export class TargetingSystem extends System {
   private static readonly LOCK_TOL = 1.2;
   /** 阵型单位防御交战的寻敌半径（攻击范围 + 余量）。 */
   private static readonly DEFEND_RANGE = 4.0;
+  /** 当前战场地形（平地则不影响）。 */
+  terrain: TerrainField | null = null;
   constructor() {
     super("TargetingSystem");
   }
@@ -127,6 +130,9 @@ export class TargetingSystem extends System {
       const dz = tp.z - p.z;
       const atk = u.getComponent(Attack)!;
       const ms = u.getComponent(MoveSpeed)!.value;
+      // 地形通行开销（林地/河流减速）
+      const terrainMul = this.terrain ? this.terrain.speedMulAt(p.x, p.z) : 1;
+      const effSpeed = ms * terrainMul;
       if (atk.ranged) {
         // 远程单位：进入射程即站定射击（不再后撤，避免无限风筝导致战斗无法结束）
         const dist = Math.hypot(dx, dz);
@@ -136,8 +142,8 @@ export class TargetingSystem extends System {
           v.vz = 0;
         } else {
           const len = dist || 1;
-          v.vx = (dx / len) * ms;
-          v.vz = (dz / len) * ms;
+          v.vx = (dx / len) * effSpeed;
+          v.vz = (dz / len) * effSpeed;
         }
         continue;
       }
@@ -147,8 +153,8 @@ export class TargetingSystem extends System {
         v.vz = 0;
       } else {
         const len = Math.hypot(dx, dz) || 1;
-        v.vx = (dx / len) * ms;
-        v.vz = (dz / len) * ms;
+        v.vx = (dx / len) * effSpeed;
+        v.vz = (dz / len) * effSpeed;
       }
     }
 
