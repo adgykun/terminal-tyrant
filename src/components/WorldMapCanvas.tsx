@@ -61,7 +61,7 @@ interface WorldMapCanvasProps {
   onJoinArmy?: (armyId: string) => void;        // 加入王国军团
   onLeaveArmy?: () => void;                     // 脱离王国军团
   /** 记录「正在与哪支大地图军团作战」，战后据此把伤亡写回该军团。 */
-  onBattleTarget?: (unitId: string, enemyTroops: Record<string, number>) => void;
+  onBattleTarget?: (unitId: string, enemyTroops: Record<string, number>, lordId?: string) => void;
 }
 
 /** 按骑砍2 兵种表计算军团总战力。 */
@@ -144,6 +144,24 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
     terrainRef.current = generateTerrainCanvas(region, seed);
     const usable = (locations as any[]).filter((l) => typeof l.x === "number");
     unitsRef.current = generateMapUnits(region, usable, seed);
+    // 军团兵力以领主部队为唯一真源：开局即与「领主」面板一致
+    const lrt = (state as any).lords_runtime;
+    if (lrt) {
+      for (const u of unitsRef.current) {
+        if (u.type !== "army" || !u.lordId) continue;
+        const ls = lrt[u.lordId];
+        if (ls?.troops && Object.keys(ls.troops).length > 0) {
+          const src: Record<string, number> = { ...ls.troops };
+          u.troops = src;
+          const pw = Object.entries(src).reduce(
+            (s, [uid, cnt]) => s + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number),
+            0,
+          );
+          // 名称里的战力同步刷新
+          u.name = u.name.replace(/\(\d+\)$/, `(${Math.round(pw)})`);
+        }
+      }
+    }
   }, [state.selected_region, locations]);
   useEffect(() => { selUnitRef.current = selUnit; }, [selUnit]);
 
@@ -323,6 +341,35 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
             const u = unitsRef.current.find((x) => x.id === rep.unitId);
             combatBusyRef.current = false;
             if (!u) continue;
+
+            if (u.lordId) {
+              // 有具名领主的军团：领主部队是唯一真源
+              // App 层已通过 defeatLord 结算过伤亡，这里直接同步显示
+              const ls = (state as any).lords_runtime?.[u.lordId];
+              const newTroops: Record<string, number> = ls?.troops ? { ...ls.troops } : {};
+              const remaining = Object.values(newTroops).reduce((a, b) => a + b, 0);
+              const wasTotal = Object.values(u.troops || {}).reduce((a, b) => a + b, 0);
+              u.troops = newTroops;
+              const lost = Math.max(0, wasTotal - remaining);
+              if (remaining <= 0 || ls?.captive) {
+                setClashToast((prev) => [
+                  ...prev.slice(-2),
+                  ls?.captive
+                    ? `${u.name} 被击溃，其领主成为你的俘虏！`
+                    : `${u.name} 被你击溃，全军覆没！`,
+                ]);
+                unitsRef.current = unitsRef.current.filter((x) => x.id !== u.id);
+              } else {
+                const m = getMemory(u);
+                m.shattered = true;
+                setClashToast((prev) => [
+                  ...prev.slice(-2),
+                  `${u.name} 被你击退，损失 ${lost} 人，残部溃逃。`,
+                ]);
+              }
+              continue;
+            }
+
             const r = applyReportToTroops(u.troops, rep.won);
             u.troops = r.troops;
             if (r.destroyed) {
@@ -333,6 +380,22 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
               const m = getMemory(u);
               m.shattered = true;
               setClashToast((prev) => [...prev.slice(-2), `${u.name} 被你击退，损失 ${r.lost} 人，残部溃逃。`]);
+            }
+          }
+        }
+
+        // 领主被俘/阵亡后，其军团从地图上消失
+        {
+          const lrt = (state as any).lords_runtime;
+          if (lrt) {
+            const before = unitsRef.current.length;
+            unitsRef.current = unitsRef.current.filter((x) => {
+              if (x.type !== "army" || !x.lordId) return true;
+              const ls = lrt[x.lordId];
+              return !(ls && (ls.dead || ls.captive));
+            });
+            if (unitsRef.current.length !== before) {
+              setClashToast((prev) => [...prev.slice(-2), "有领主的军团撤离了战场。"]);
             }
           }
         }
@@ -384,7 +447,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
                 if (d > 1.8) continue;
                 combatBusyRef.current = true;
                 const troops = { ...(u.troops || {}) };
-                if (onBattleTarget) onBattleTarget(u.id, troops);
+                if (onBattleTarget) onBattleTarget(u.id, troops, u.lordId);
                 if (onStartBattle) {
                   onStartBattle(troops, `${u.name} 挡住了你的去路！（${bannerlordPower(troops)} 战力）`);
                 }
@@ -986,7 +1049,7 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
                   if (onStartBattle) {
                     onStartBattle(realTroops, `与 ${selUnit.name} 交战（${realPower} 战力）`);
                     // 记录这是对哪支军团开战，战后据此结算
-                    if (onBattleTarget) onBattleTarget(selUnit.id, realTroops);
+                    if (onBattleTarget) onBattleTarget(selUnit.id, realTroops, selUnit.lordId);
                   } else {
                     onUnitCombat?.(realPower, `与 ${selUnit.name} 交战`);
                   }
