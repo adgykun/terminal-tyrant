@@ -15,6 +15,7 @@ import { CombatModal } from "./components/CombatModal";
 import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops } from "./core/engine";
 import { reportBattle } from "./core/battle_bridge";
+import { defeatLord } from "./core/lords_system";
 
 export default function App() {
   const game = useGame();
@@ -113,9 +114,9 @@ export default function App() {
                 game.startBattle(res.battle.enemy_troops, res.battle.enemy_power, res.battle.description);
               }
             }}
-            onBattleTarget={(unitId, enemyTroops) => {
+            onBattleTarget={(unitId, enemyTroops, lordId) => {
               // 记录正在与哪支大地图军团交战，战后把伤亡写回该军团
-              game.setBattleTarget?.(unitId, enemyTroops);
+              game.setBattleTarget?.(unitId, enemyTroops, lordId);
             }}
             onUnitInteract={(u) => {
               const txt = u.type === "caravan" ? "商队表示可以与你交易货物（尚未实现跑商）。" : "旅人向你打听附近的情报（尚未实现 NPC 对话）。";
@@ -172,6 +173,7 @@ export default function App() {
             enemyTroops={game.battleEnemy?.enemyTroops}
             onBattleEnd={(result) => {
               const targetUnitId = game.battleEnemy?.sourceUnitId;
+              const targetLordId = game.battleEnemy?.sourceLordId;
               // 战斗结束：把按兵种伤亡精确写回 state.troops
               game.performAction((s: any) => {
                 const t = s.troops ?? {};
@@ -188,6 +190,16 @@ export default function App() {
                 // ── 闭环：把胜负写回大地图上的那支军团 ──
                 if (targetUnitId) {
                   reportBattle(targetUnitId, result.won);
+                }
+                // ── 闭环：战胜具名领主 → 触发其部队减员与俘获判定 ──
+                if (result.won && targetLordId) {
+                  const dr = defeatLord(s, targetLordId);
+                  if (dr) {
+                    s.add_log?.(dr.message);
+                    if (dr.captured) {
+                      s.add_log?.(`你可以前往「领主」面板处置这位俘虏。`);
+                    }
+                  }
                 }
                 return { message: result.won ? "胜利！伤亡已记入部队。" : "溃败…伤亡已记入部队。" };
               });
