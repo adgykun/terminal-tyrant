@@ -82,6 +82,7 @@ import {
     activeWars,
 } from "./diplomacy.js";
 import { lordsDailyUpdate, ensureLords, defeatLord } from "./lords_system.js";
+import { troopsByCulture, BANNERLORD_TROOPS } from "./troops_bannerlord.js";
 
 let _quest_id_counter = 1;
 
@@ -1424,6 +1425,66 @@ export function retreat_siege(state: any): string {
     state.siege = null;
     state.add_log(msg);
     return msg;}
+
+/** 王国 → 文化（用于生成守军兵种）。 */
+const SIEGE_KINGDOM_CULTURE: Record<string, string> = {
+    empire_n: "empire", empire_w: "empire", empire_s: "empire",
+    sturgia: "sturgia", aserai: "aserai", vlandia: "vlandia",
+    battania: "battania", khuzait: "khuzait",
+};
+
+/**
+ * 攻城战：把守军规模折算成 3D 战场的敌军兵种构成。
+ * 守军规模取自 state.siege.garrison（start_siege 时生成）。
+ */
+export function siege_defender_troops(state: any): Record<string, number> {
+    const garrison = state.siege?.garrison ?? 40;
+    const loc = state.siege ? get_location(state, state.siege.location_id) : null;
+    const kg = loc ? kingdom_of_location(loc) : null;
+    const culture = (kg && SIEGE_KINGDOM_CULTURE[kg]) || "empire";
+    let pool: any[] = [];
+    try { pool = troopsByCulture(culture) ?? []; } catch { pool = []; }
+    if (!pool || pool.length === 0) pool = Object.values(BANNERLORD_TROOPS).slice(0, 10);
+
+    const out: Record<string, number> = {};
+    for (let i = 0; i < garrison; i++) {
+        // 守军以步兵为主，少量弓手（城墙优势）
+        const tier = i % 10 < 6 ? 1 : i % 10 < 9 ? 0 : 2;
+        const t = pool[Math.min(tier, pool.length - 1)];
+        const uid = t?.id;
+        if (!uid) continue;
+        out[uid] = (out[uid] ?? 0) + 1;
+    }
+    return out;
+}
+
+/** 3D 攻城战胜利：城池易主（伤亡已由战场统计）。 */
+export function siege_assault_victory(state: any): string {
+    if (!state.siege) return `当前没有进行中的攻城战。`;
+    const loc = get_location(state, state.siege.location_id);
+    if (!loc) {
+        // 地点已不存在（读档/切图）：兜底按声望结算，避免卡死围城状态
+        const gained = 30;
+        state.renown = (state.renown ?? 0) + gained;
+        state.siege = null;
+        const msg = `攻城成功！守军崩溃，但你已无法确认目标城池（可能已更名或迁徙）。声望 +${gained}。`;
+        state.add_log(msg);
+        return msg;
+    }
+    return finish_siege(state, loc, [`城门既破，守军崩溃！`]);
+}
+
+/** 3D 攻城战失败：部队受创、士气下跌，围城继续但需重整。 */
+export function siege_assault_defeat(state: any): string {
+    if (!state.siege) return `当前没有进行中的攻城战。`;
+    const loc = get_location(state, state.siege.location_id);
+    state.morale = Math.max(0, (state.morale ?? 50) - 12);
+    // 强攻失败：围城天数回退，需要重新准备
+    state.siege.days_remaining = Math.min(6, (state.siege.days_remaining ?? 3) + 2);
+    const msg = `强攻 [${loc?.name ?? "敌城"}] 失败，部队溃退。士气 -12，需重整后再攻。`;
+    state.add_log(msg);
+    return msg;
+}
 
 /** 守城战：玩家所在城镇被 AI 大军围攻时出战。胜则守城成功，败则城池易主。 */
 export function defend_siege(state: any, location_id: string): string {
