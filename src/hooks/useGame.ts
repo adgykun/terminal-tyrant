@@ -33,6 +33,8 @@ export interface BattleEnemy {
   enemyTroops: Record<string, number>;
   enemyPower: number;
   description: string;
+  /** 若这场仗打的是大地图上的某支军团，记录其 id，战后把伤亡写回。 */
+  sourceUnitId?: string;
 }
 const SAVE_KEY = "terminal_tyrant_save";
 export function useGame() {
@@ -124,8 +126,19 @@ export function useGame() {
   const startBattle = useCallback((enemyTroops: Record<string, number>, enemyPower = 0, description = "") => {
     setCombat(null);
     setEventPopup(null);
-    setBattleEnemy({ enemyTroops, enemyPower, description });
+    // 保留上一轮记录的大地图军团 id（若有）
+    setBattleEnemy((prev) => ({ enemyTroops, enemyPower, description, sourceUnitId: prev?.sourceUnitId }));
     setView("battle");
+  }, []);
+
+  /** 记录本场战斗对应的大地图军团，供战后结算。 */
+  const setBattleTarget = useCallback((unitId: string, enemyTroops: Record<string, number>) => {
+    setBattleEnemy((prev) => ({
+      enemyTroops: prev?.enemyTroops ?? enemyTroops,
+      enemyPower: prev?.enemyPower ?? 0,
+      description: prev?.description ?? "",
+      sourceUnitId: unitId,
+    }));
   }, []);
 
   const toggleVoice = useCallback(() => {
@@ -151,6 +164,7 @@ export function useGame() {
     setResultMessage,
     setBattleEnemy,
     startBattle,
+    setBattleTarget,
     startNewGame,
     loadGame,
     hasSave,
