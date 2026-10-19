@@ -1472,7 +1472,23 @@ export function ai_siege_daily_progress(state: any): void {
         // 到期：AI 破城
         const loc = get_location(state, th.location_id);
         if (loc) {
-            loc.faction_id = RF_TO_KINGDOM[th.attacker] || th.attacker;
+            const atkK = RF_TO_KINGDOM[th.attacker] || th.attacker;
+            const defK = RF_TO_KINGDOM[th.defender] || th.defender;
+            loc.faction_id = atkK;
+
+            // ── 闭环：AI 攻城同样改变势力实力与厌战 ──
+            const dip = ensureDiplomacy(state);
+            if (dip.kingdoms[defK]) {
+                dip.kingdoms[defK].strength = Math.max(30, dip.kingdoms[defK].strength - 20);
+                dip.kingdoms[defK].fiefCount = Math.max(0, dip.kingdoms[defK].fiefCount - 1);
+                dip.kingdoms[defK].warWeariness = Math.min(100, dip.kingdoms[defK].warWeariness + 15);
+            }
+            if (dip.kingdoms[atkK]) {
+                dip.kingdoms[atkK].strength = Math.min(400, dip.kingdoms[atkK].strength + 20);
+                dip.kingdoms[atkK].fiefCount += 1;
+                dip.kingdoms[atkK].warWeariness = Math.max(0, dip.kingdoms[atkK].warWeariness - 5);
+            }
+
             const resultMsg = `【战报】${FACTIONS[th.attacker]?.name ?? th.attacker} 攻陷了 ${FACTIONS[th.defender]?.name ?? th.defender} 的 [${loc.name}]！`;
             state.add_log(resultMsg);
             if (state.location === loc.id) {
@@ -1579,6 +1595,26 @@ function finish_siege(state: any, loc: any, msgs: string[]): string {
         state.faction_relations[oldK] = (state.faction_relations[oldK] ?? 0) - 15;
     }
     state.faction_relations[state.vassal_of] = (state.faction_relations[state.vassal_of] ?? 0) + 10;
+
+    // ── 闭环：领土易手立即反映到外交内核 ──
+    // 失去城池的王国实力下降、厌战上升；夺取方实力上升。
+    // 这会让后续的宣战/议和判断基于「真实战果」而非初始数据。
+    const dip = ensureDiplomacy(state);
+    if (oldK && dip.kingdoms[oldK]) {
+        dip.kingdoms[oldK].strength = Math.max(30, dip.kingdoms[oldK].strength - 25);
+        dip.kingdoms[oldK].fiefCount = Math.max(0, dip.kingdoms[oldK].fiefCount - 1);
+        dip.kingdoms[oldK].warWeariness = Math.min(100, dip.kingdoms[oldK].warWeariness + 12);
+    }
+    if (state.vassal_of && dip.kingdoms[state.vassal_of]) {
+        dip.kingdoms[state.vassal_of].strength = Math.min(400, dip.kingdoms[state.vassal_of].strength + 25);
+        dip.kingdoms[state.vassal_of].fiefCount += 1;
+        // 胜利提升信心，降低厌战
+        dip.kingdoms[state.vassal_of].warWeariness = Math.max(0, dip.kingdoms[state.vassal_of].warWeariness - 8);
+    }
+    if (oldK && oldK !== state.vassal_of) {
+        setRelation(dip, oldK, state.vassal_of, getRelation(dip, oldK, state.vassal_of) - 10);
+    }
+
     // 40% 概率国王封地给封臣
     let fief_msg = "";
     if (Math.random() < 0.4 && !state.fiefs.includes(loc_id)) {
