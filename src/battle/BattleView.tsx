@@ -36,6 +36,7 @@ import { Morale } from "./Morale";
 import { MoraleSystem } from "./MoraleSystem";
 import { RoutSystem } from "./RoutSystem";
 import { SiegeSystem, SIEGE_LAYOUT } from "./Siege";
+import { type TerrainField, type TerrainFeature, terrainFromFeatures, flatTerrain } from "./Terrain";
 import { preloadModels } from "./ModelCache";
 
 /** 战斗结算数据。 */
@@ -123,6 +124,38 @@ export function BattleView({
     const routSys = new RoutSystem();
     const renderSys = new RenderSystem(mount);
     const isSiege = !!siege;
+    // ── 地形：野战随机生成山丘/林地/河流；攻城战固定"城前缓坡"（守方高地优势） ──
+    const terrainFeatures: TerrainFeature[] = isSiege
+      ? [
+          // 城门内侧略高：守军站高处射程与伤害都有加成
+          { type: "hill", x: SIEGE_LAYOUT.gateX, z: SIEGE_LAYOUT.gateZ - 12, radius: 16, magnitude: 3.2 },
+          // 进攻方必经的一片疏林（减速，但不足以阻断全部远程）
+          { type: "wood", x: -14, z: 8, radius: 7, magnitude: 0 },
+          { type: "wood", x: 16, z: 4, radius: 6, magnitude: 0 },
+        ]
+      : (() => {
+          // 野战：确定性伪随机地形（同一天同一场战斗地形一致）
+          let seed = (pList.length * 7919 + eList.length * 104729) % 100000;
+          const rnd = () => {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            return seed / 0x7fffffff;
+          };
+          const out: TerrainFeature[] = [];
+          const nHills = 1 + Math.floor(rnd() * 2);
+          for (let i = 0; i < nHills; i++) {
+            out.push({ type: "hill", x: -18 + rnd() * 36, z: -16 + rnd() * 32, radius: 6 + rnd() * 5, magnitude: 2.5 + rnd() * 3 });
+          }
+          if (rnd() < 0.6) {
+            out.push({ type: "wood", x: -16 + rnd() * 32, z: -12 + rnd() * 24, radius: 5 + rnd() * 4, magnitude: 0 });
+          }
+          if (rnd() < 0.35) {
+            out.push({ type: "river", x: 0, z: -6 + rnd() * 12, radius: 22, magnitude: 3.2 });
+          }
+          return out;
+        })();
+    const terrain: TerrainField = terrainFromFeatures(terrainFeatures);
+    targetingSys.terrain = terrain;
+    combatSys.terrain = terrain;
     // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → [攻城：城墙阻挡/砸门] → 交战
     //          → 士气演化 → 溃逃位移 → 渲染
     const siegeSys = isSiege
@@ -162,6 +195,8 @@ export function BattleView({
       };
       renderSys.enableSiege(SIEGE_LAYOUT);
     }
+    // 地形视觉（山丘/林地/河流）
+    renderSys.enableTerrain(terrainFeatures, terrain.heightAt);
     // 生成战场：真实部队（每个实体按兵种规格差异化，并记录兵种 id）
     const spawnArmy = (
       side: number,
