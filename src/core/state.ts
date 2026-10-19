@@ -120,6 +120,10 @@ export class GameState {
     available_futures: any[];
     available_bonds: any[];
     travel_accum: number;
+    /** 外交内核状态（运行时演化，随存档持久化）。 */
+    diplomacy?: any;
+    /** 领主个人运行时状态（兵力/好感/俘虏/生死）。 */
+    lords_runtime?: Record<string, any>;
 
     constructor(data: GameStateData = {}) {
         this.day = data.day ?? 1;
@@ -189,6 +193,8 @@ export class GameState {
         this.available_futures = data.available_futures ? [...data.available_futures] : [];
         this.available_bonds = data.available_bonds ? [...data.available_bonds] : [];
         this.travel_accum = data.travel_accum ?? 0;
+        this.diplomacy = data.diplomacy;
+        this.lords_runtime = data.lords_runtime;
     }
 
     /** 金钱属性别名，指向 gold。 */
@@ -273,6 +279,8 @@ export class GameState {
             available_futures: this.available_futures.map(f => ({ ...f })),
             available_bonds: this.available_bonds.map(b => ({ ...b })),
             travel_accum: this.travel_accum,
+            diplomacy: this.diplomacy ?? null,
+            lords_runtime: this.lords_runtime ? { ...this.lords_runtime } : null,
         };
     }
 
@@ -334,6 +342,8 @@ export class GameState {
             available_futures: data.available_futures ?? [],
             available_bonds: data.available_bonds ?? [],
             travel_accum: data.travel_accum ?? 0,
+            diplomacy: data.diplomacy ?? null,
+            lords_runtime: data.lords_runtime ?? null,
         });
     }
 
