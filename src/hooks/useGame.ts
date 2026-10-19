@@ -36,6 +36,8 @@ export interface BattleEnemy {
   description: string;
   /** 若这场仗打的是大地图上的某支军团，记录其 id，战后把伤亡写回。 */
   sourceUnitId?: string;
+  /** 若该军团由某位具名领主统率，记录其 id，战胜后可俘获。 */
+  sourceLordId?: string;
 }
 const SAVE_KEY = "terminal_tyrant_save";
 export function useGame() {
@@ -128,19 +130,27 @@ export function useGame() {
     setCombat(null);
     setEventPopup(null);
     // 保留上一轮记录的大地图军团 id（若有）
-    setBattleEnemy((prev) => ({ enemyTroops, enemyPower, description, sourceUnitId: prev?.sourceUnitId }));
+    setBattleEnemy((prev) => ({
+      enemyTroops, enemyPower, description,
+      sourceUnitId: prev?.sourceUnitId,
+      sourceLordId: prev?.sourceLordId,
+    }));
     setView("battle");
   }, []);
 
   /** 记录本场战斗对应的大地图军团，供战后结算。 */
-  const setBattleTarget = useCallback((unitId: string, enemyTroops: Record<string, number>) => {
-    setBattleEnemy((prev) => ({
-      enemyTroops: prev?.enemyTroops ?? enemyTroops,
-      enemyPower: prev?.enemyPower ?? 0,
-      description: prev?.description ?? "",
-      sourceUnitId: unitId,
-    }));
-  }, []);
+  const setBattleTarget = useCallback(
+    (unitId: string, enemyTroops: Record<string, number>, lordId?: string) => {
+      setBattleEnemy((prev) => ({
+        enemyTroops: prev?.enemyTroops ?? enemyTroops,
+        enemyPower: prev?.enemyPower ?? 0,
+        description: prev?.description ?? "",
+        sourceUnitId: unitId,
+        sourceLordId: lordId,
+      }));
+    },
+    [],
+  );
 
   const toggleVoice = useCallback(() => {
     const newVal = !voiceEnabled;
