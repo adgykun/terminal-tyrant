@@ -10,6 +10,8 @@ import type { GameState } from "../core/state";
 import { generateTerrainCanvas, type TerrainLayer } from "../core/terrain_noise";
 import { generateMapUnits, advanceUnits, RF_TO_KINGDOM, KINGDOM_REL, type MapUnit } from "../core/map_units";
 import { advanceArmies, pruneDestroyed } from "../core/lord_ai";
+import { drainBattleReports, applyReportToTroops } from "../core/battle_bridge";
+import { getMemory } from "../core/lord_ai";
 import { BANNERLORD_TROOPS } from "../core/troops_bannerlord";
 
 function troopName(id: string): string {
@@ -58,6 +60,17 @@ interface WorldMapCanvasProps {
   onSiege?: (action: "start" | "advance" | "assault" | "retreat", locId?: string) => void; // 攻城战
   onJoinArmy?: (armyId: string) => void;        // 加入王国军团
   onLeaveArmy?: () => void;                     // 脱离王国军团
+  /** 记录「正在与哪支大地图军团作战」，战后据此把伤亡写回该军团。 */
+  onBattleTarget?: (unitId: string, enemyTroops: Record<string, number>) => void;
+}
+
+/** 按骑砍2 兵种表计算军团总战力。 */
+function bannerlordPower(troops?: Record<string, number>): number {
+  if (!troops) return 0;
+  return Object.entries(troops).reduce(
+    (s, [uid, cnt]) => s + (BANNERLORD_TROOPS[uid]?.power ?? 1) * (cnt as number),
+    0,
+  );
 }
 
 // === 工具 ===
@@ -70,7 +83,7 @@ function lerpPt(a: { x: number; y: number }, b: { x: number; y: number }, t: num
 }
 
 // === 主组件 ===
-export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onStartBattle, onUnitInteract, onPassBattle, onCamp, onSiege, onJoinArmy, onLeaveArmy }: WorldMapCanvasProps) {
+export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitPicked, onUnitCombat, onStartBattle, onUnitInteract, onPassBattle, onCamp, onSiege, onJoinArmy, onLeaveArmy, onBattleTarget }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -302,6 +315,28 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
       // AI 单位逐帧推进（活地图，返回军团战斗消息）
       {
         const usable = (locations as any[]).filter((l) => typeof l.x === "number");
+
+        // ── 消费 3D 战斗结果：把胜负应用到对应军团 ──
+        const reports = drainBattleReports();
+        if (reports.length > 0) {
+          for (const rep of reports) {
+            const u = unitsRef.current.find((x) => x.id === rep.unitId);
+            combatBusyRef.current = false;
+            if (!u) continue;
+            const r = applyReportToTroops(u.troops, rep.won);
+            u.troops = r.troops;
+            if (r.destroyed) {
+              setClashToast((prev) => [...prev.slice(-2), `${u.name} 被你击溃，全军覆没！`]);
+              unitsRef.current = unitsRef.current.filter((x) => x.id !== u.id);
+            } else {
+              // 残部撤退
+              const m = getMemory(u);
+              m.shattered = true;
+              setClashToast((prev) => [...prev.slice(-2), `${u.name} 被你击退，损失 ${r.lost} 人，残部溃逃。`]);
+            }
+          }
+        }
+
         if (unitsRef.current.length) {
           // 军团：由 lord_ai 意图驱动（围城/驰援/追击/撤退），遭遇战真实减员
           const armies = advanceArmies(dt, {
@@ -330,6 +365,32 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
           const otherMsgs = advanceUnits(unitsRef.current, dt, usable, 0);
           if (otherMsgs.length > 0) {
             setClashToast((prev) => [...prev.slice(-2), ...otherMsgs]);
+          }
+
+          // ── 玩家与敌军接触 → 自动开战（骑砍式遭遇） ──
+          if (!combatBusyRef.current) {
+            const ppos = playerPosRef.current;
+            // 玩家所在阵营：已效忠则用王国，否则视为独立冒险者（只与所有王国敌对中的都不打）
+            const myK = (state as any).vassal_of as string | null;
+            if (myK) {
+              for (const u of unitsRef.current) {
+                if (u.type !== "army" || !u.factionKey || u.factionKey === myK) continue;
+                const total = Object.values(u.troops || {}).reduce((s, n) => s + n, 0);
+                if (total <= 0) continue;
+                const atWar = (KINGDOM_REL[myK]?.[u.factionKey] ?? 0) < 0 ||
+                  (KINGDOM_REL[u.factionKey]?.[myK] ?? 0) < 0;
+                if (!atWar) continue;
+                const d = Math.hypot(u.x - ppos.x, u.y - ppos.y);
+                if (d > 1.8) continue;
+                combatBusyRef.current = true;
+                const troops = { ...(u.troops || {}) };
+                if (onBattleTarget) onBattleTarget(u.id, troops);
+                if (onStartBattle) {
+                  onStartBattle(troops, `${u.name} 挡住了你的去路！（${bannerlordPower(troops)} 战力）`);
+                }
+                break;
+              }
+            }
           }
         }
       }
@@ -917,9 +978,18 @@ export function WorldMapCanvas({ state, onMove, onEnterTown, onFreeMove, onUnitP
             {selUnit.type === "army" && (
               <>
                 <button className="wmc-btn" onClick={() => {
-                  const enemyTroops = power_to_enemy_troops(15);
-                  if (onStartBattle) onStartBattle(enemyTroops, `与 ${selUnit.name} 交战`);
-                  else onUnitCombat?.(15, `与 ${selUnit.name} 交战`);
+                  // 用该军团**真实兵力构成**开战，而不是固定数值
+                  const realTroops = selUnit.troops && Object.keys(selUnit.troops).length > 0
+                    ? { ...selUnit.troops }
+                    : power_to_enemy_troops(bannerlordPower(selUnit.troops));
+                  const realPower = bannerlordPower(selUnit.troops);
+                  if (onStartBattle) {
+                    onStartBattle(realTroops, `与 ${selUnit.name} 交战（${realPower} 战力）`);
+                    // 记录这是对哪支军团开战，战后据此结算
+                    if (onBattleTarget) onBattleTarget(selUnit.id, realTroops);
+                  } else {
+                    onUnitCombat?.(realPower, `与 ${selUnit.name} 交战`);
+                  }
                 }}>交战</button>
                 {state.vassal_of && selUnit.factionKey === state.vassal_of && !state.joined_army && (
                   <button className="wmc-btn" onClick={() => onJoinArmy?.(selUnit.id)}>加入军团</button>
