@@ -1,5 +1,5 @@
 import type { GameState } from "../core/state";
-import { GOODS, UNITS, EQUIPMENT, FACILITY_NAMES } from "../core/data";
+import { GOODS, UNITS, EQUIPMENT, FACILITY_NAMES, RECIPES } from "../core/data";
 import {
   get_current_location,
   init_region,
@@ -17,10 +17,12 @@ import {
   fish,
   sell_fish,
   buy_gear,
+  commission_crafting,
 } from "../core/engine";
+import { localPrice, PROCESSING_CHAIN } from "../core/trade_chain";
 import { get_region } from "../core/world_regions";
 import SlotMachine from "./SlotMachine";
-import { Castle, Coins, Sword, Beer, Dices, Wrench, Fish, Bed, ArrowLeft, Users } from "lucide-react";
+import { Castle, Coins, Sword, Beer, Dices, Wrench, Fish, Bed, ArrowLeft, Users, Hammer } from "lucide-react";
 
 interface TownSceneProps {
   state: GameState;
@@ -86,6 +88,34 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
   const hasSmithy = town_has(loc, "forge");
   const isPort = loc.type === "port";
   const siegeThreat = (state.ai_sieges ?? []).find((t: any) => t.location_id === loc.id);
+  // 价格形成上下文：本地是否被围、是否卷入战争
+  const tradeCtx = {
+    besiegedLocations: new Set<string>(
+      ((state.ai_sieges ?? []) as any[]).map((t) => t.location_id as string),
+    ),
+    atWar: false,
+    warDays: 0,
+  };
+  // 本地工坊可加工的配方（城镇才有）
+  const workshopOffers = Object.entries(PROCESSING_CHAIN)
+    .filter(([, v]) => facilities.includes(v.facility))
+    .map(([rawId, v]) => {
+      const key = Object.keys(RECIPES).find(
+        (k) => (RECIPES as any)[k].input_goods === rawId && (RECIPES as any)[k].output_goods === v.output,
+      );
+      const recipe = key ? ((RECIPES as any)[key] as any) : null;
+      return {
+        recipeId: recipe?.id ?? "",
+        rawId,
+        outputId: v.output,
+        rawName: GOODS[rawId]?.name ?? rawId,
+        outputName: GOODS[v.output]?.name ?? v.output,
+        need: recipe?.input_amount ?? 3,
+        gain: recipe?.output_amount ?? 1,
+        fee: recipe?.fee ?? 0,
+      };
+    })
+    .filter((w) => w.recipeId);
   return (
     <div>
       <div className="panel">
@@ -120,6 +150,8 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
             {goodsIds.map((gid) => {
               const info = loc.market[gid];
               const owned = state.inventory[gid] ?? 0;
+              // 价格成因：为什么这里贵/便宜（产地折扣、工坊、围城等）
+              const price = localPrice(state.location!, gid, state.day ?? 1, tradeCtx);
               return (
                 <div key={gid} className="card">
                   <div className="card-title">
@@ -128,11 +160,46 @@ export function TownScene({ state, performAction, setView }: TownSceneProps) {
                   </div>
                   <div className="card-desc text-sm mb-8">
                     买 {info.buy_price} / 卖 {info.sell_price} 金
+                    {price.reason !== "行市平稳" && (
+                      <span style={{ color: "var(--accent-gold)" }}>（{price.reason}）</span>
+                    )}
                   </div>
                   <div className="flex-row gap-8">
                     <button className="primary" onClick={() => performAction(trade, state.location, "buy", gid, 1)}>买 1</button>
                     <button className="secondary" onClick={() => performAction(trade, state.location, "sell", gid, 1)} disabled={owned < 1}>卖 1</button>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 工坊：把原料加工成高价品（骑砍式产业链） */}
+      {workshopOffers.length > 0 && (
+        <div className="panel">
+          <div className="panel-title"><Hammer size={22} /> 工坊</div>
+          <div className="card-desc text-sm mb-8">
+            本地工坊可将原料加工为高价品。加工价已含工费。
+          </div>
+          <div className="card-grid">
+            {workshopOffers.map((w) => {
+              const have = state.inventory[w.rawId] ?? 0;
+              const canDo = have >= w.need;
+              return (
+                <div key={w.outputId} className="card">
+                  <div className="card-title">{w.rawName} → {w.outputName}</div>
+                  <div className="card-desc text-sm mb-8">
+                    消耗 {w.need} {w.rawName} + {w.fee} 金 · 产出 {w.gain} {w.outputName}
+                    <br />你持有 {have} {w.rawName}
+                  </div>
+                  <button
+                    className="primary"
+                    disabled={!canDo || (state.gold ?? 0) < w.fee}
+                    onClick={() => performAction(commission_crafting, w.recipeId, state.location)}
+                  >
+                    {canDo && (state.gold ?? 0) >= w.fee ? "加工" : "原料/金币不足"}
+                  </button>
                 </div>
               );
             })}
