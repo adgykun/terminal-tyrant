@@ -35,6 +35,7 @@ import { CommandSystem, type CommandState } from "./CommandSystem";
 import { Morale } from "./Morale";
 import { MoraleSystem } from "./MoraleSystem";
 import { RoutSystem } from "./RoutSystem";
+import { SiegeSystem, SIEGE_LAYOUT } from "./Siege";
 import { preloadModels } from "./ModelCache";
 
 /** 战斗结算数据。 */
@@ -56,6 +57,8 @@ interface BattleViewProps {
   maxUnits?: number;
   /** 战斗结束回调（任一方全灭时触发一次）。 */
   onBattleEnd?: (result: BattleEndResult) => void;
+  /** 攻城战：给出则进入攻城模式（城墙隔开两军，先破门再肉搏）。 */
+  siege?: { name: string; gateHp?: number };
 }
 
 export function BattleView({
@@ -63,6 +66,7 @@ export function BattleView({
   enemyTroops,
   maxUnits = 60,
   onBattleEnd,
+  siege,
 }: BattleViewProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<World | null>(null);
@@ -82,6 +86,9 @@ export function BattleView({
   const [command, setCommand] = useState<CommandState>({ type: "line", mode: "formation" });
   // 模型加载进度（null = 未开始 / 已完成）
   const [modelProgress, setModelProgress] = useState<{ loaded: number; total: number } | null>(null);
+  // 攻城战：城门耐久比例与是否破门
+  const [gateFrac, setGateFrac] = useState(1);
+  const [breached, setBreached] = useState(false);
 
   // 战斗结束只触发一次
   const endedRef = useRef(false);
@@ -115,13 +122,26 @@ export function BattleView({
     const moraleSys = new MoraleSystem();
     const routSys = new RoutSystem();
     const renderSys = new RenderSystem(mount);
-    // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → 交战
+    const isSiege = !!siege;
+    // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → [攻城：城墙阻挡/砸门] → 交战
     //          → 士气演化 → 溃逃位移 → 渲染
+    const siegeSys = isSiege
+      ? new SiegeSystem({
+          gateX: SIEGE_LAYOUT.gateX,
+          gateZ: SIEGE_LAYOUT.gateZ,
+          gateHalfWidth: SIEGE_LAYOUT.gateHalfWidth,
+          gateHp: siege?.gateHp ?? 320,
+          attackerSide: 0,
+          defenderSide: 1,
+          damagePerUnitPerSec: 2.2,
+        })
+      : null;
     world.addSystem(playerInputSys);
     world.addSystem(commandSys);
     world.addSystem(formationSys);
     world.addSystem(targetingSys);
     world.addSystem(moveSys);
+    if (siegeSys) world.addSystem(siegeSys);
     world.addSystem(combatSys);
     world.addSystem(moraleSys);
     world.addSystem(routSys);
@@ -130,6 +150,18 @@ export function BattleView({
     commandSys.onChange = (state) => setCommand(state);
     // 玩家攻击命中 → 镜头震动（跨系统回调：CombatSystem 出手 → RenderSystem shake）
     combatSys.onPlayerAttack = () => renderSys.addShake();
+    if (siegeSys) {
+      siegeSys.onGateDamage = (frac) => {
+        renderSys.setGateDamage(frac);
+        setGateFrac(frac);
+      };
+      siegeSys.onBreach = () => {
+        renderSys.openGate();
+        renderSys.addShake();
+        setBreached(true);
+      };
+      renderSys.enableSiege(SIEGE_LAYOUT);
+    }
     // 生成战场：真实部队（每个实体按兵种规格差异化，并记录兵种 id）
     const spawnArmy = (
       side: number,
@@ -140,14 +172,31 @@ export function BattleView({
     ) => {
       let i = 0;
       for (const spec of troops) {
-        const col = i % 6;
-        const row = Math.floor(i / 6);
+        const col = i % 8;
+        const row = Math.floor(i / 8);
+        let px: number;
+        let pz: number;
+        if (isSiege) {
+          // 攻城布局：进攻方（side 0）在墙外集结，守方在墙后
+          const spacing = 1.7;
+          const lateral = (col - 3.5) * spacing + SIEGE_LAYOUT.gateX;
+          if (side === 0) {
+            px = lateral;
+            pz = SIEGE_LAYOUT.gateZ + 7 + row * spacing;
+          } else {
+            px = lateral;
+            pz = SIEGE_LAYOUT.gateZ - 4 - row * spacing;
+          }
+        } else {
+          px = x0 + col * 1.6 - 4;
+          pz = row * 1.6 - 4;
+        }
         const e = world.createEntity();
-        e.addComponent(new Position(x0 + col * 1.6 - 4, spec.height / 2, row * 1.6 - 4))
+        e.addComponent(new Position(px, spec.height / 2, pz))
           .addComponent(new Velocity(0, 0, 0))
           .addComponent(new Team(side, color))
           .addComponent(new Health(spec.hp))
-          .addComponent(new Attack(spec.damage, spec.range, spec.cooldown))
+          .addComponent(new Attack(spec.damage, spec.range, spec.cooldown, spec.ranged))
           .addComponent(new Target(null))
           .addComponent(new Visual(spec.radius, spec.height))
           .addComponent(new MoveSpeed(spec.speed))
@@ -165,7 +214,7 @@ export function BattleView({
     // 玩家英雄实体：蓝色、体积 1.5 倍、高血量高攻击，带 PlayerControl
     const player = world.createEntity();
     player
-      .addComponent(new Position(8, 0.9, 0))
+      .addComponent(new Position(isSiege ? SIEGE_LAYOUT.gateX : 8, 0.9, isSiege ? SIEGE_LAYOUT.gateZ + 12 : 0))
       .addComponent(new Velocity(0, 0, 0))
       .addComponent(new Team(0, 0x44ccff))
       .addComponent(new Health(300))
@@ -185,6 +234,7 @@ export function BattleView({
       world.removeSystem(routSys);
       world.removeSystem(moraleSys);
       world.removeSystem(combatSys);
+      if (siegeSys) world.removeSystem(siegeSys);
       world.removeSystem(moveSys);
       world.removeSystem(targetingSys);
       world.removeSystem(formationSys);
@@ -264,8 +314,15 @@ export function BattleView({
       <div ref={mountRef} className="battle-mount" />
       <div className="battle-hud">
         <span>
-          ⚔ ECS 战场 · 蓝 {stats.p}/{total.p} · 红 {stats.e}/{total.e}
+          {siege ? `🏰 攻城战 · ${siege.name}` : "⚔ ECS 战场"} · 蓝 {stats.p}/{total.p} · 红 {stats.e}/{total.e}
         </span>
+        {siege && (
+          <span style={{ color: breached ? "#7ec87e" : "#e0a84a" }}>
+            {breached
+              ? "城门已破！冲入门洞"
+              : `城门耐久 ${Math.round(gateFrac * 100)}% —— 顶着箭雨砸门`}
+          </span>
+        )}
         <span className="battle-command">
           阵型：{FORMATION_NAMES[command.type]}（{COMMAND_NAMES[command.mode]}）｜
           [1]线列 [2]楔形 [3]圆形 [4]纵队 [5]散兵 [F]冲锋 [H]驻守 [R]撤退
