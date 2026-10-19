@@ -13,6 +13,7 @@ import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
 import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops } from "./core/engine";
+import { reportBattle } from "./core/battle_bridge";
 
 export default function App() {
   const game = useGame();
@@ -111,6 +112,10 @@ export default function App() {
                 game.startBattle(res.battle.enemy_troops, res.battle.enemy_power, res.battle.description);
               }
             }}
+            onBattleTarget={(unitId, enemyTroops) => {
+              // 记录正在与哪支大地图军团交战，战后把伤亡写回该军团
+              game.setBattleTarget?.(unitId, enemyTroops);
+            }}
             onUnitInteract={(u) => {
               const txt = u.type === "caravan" ? "商队表示可以与你交易货物（尚未实现跑商）。" : "旅人向你打听附近的情报（尚未实现 NPC 对话）。";
               game.setEventPopup({ title: u.type === "caravan" ? "遇到商队" : "遇到旅人", description: txt, type: "info" });
@@ -163,6 +168,7 @@ export default function App() {
             playerTroops={gs.troops}
             enemyTroops={game.battleEnemy?.enemyTroops}
             onBattleEnd={(result) => {
+              const targetUnitId = game.battleEnemy?.sourceUnitId;
               // 战斗结束：把按兵种伤亡精确写回 state.troops
               game.performAction((s: any) => {
                 const t = s.troops ?? {};
@@ -176,6 +182,10 @@ export default function App() {
                     ? `3D 战场大捷！阵亡 ${lost} 人，余部 ${Object.values(result.survivors as Record<string, number>).reduce((a: number, b) => a + b, 0)} 人凯旋。`
                     : `3D 战场失利…部队全灭，伤亡 ${lost} 人。`
                 );
+                // ── 闭环：把胜负写回大地图上的那支军团 ──
+                if (targetUnitId) {
+                  reportBattle(targetUnitId, result.won);
+                }
                 return { message: result.won ? "胜利！伤亡已记入部队。" : "溃败…伤亡已记入部队。" };
               });
               // 战斗结束：清敌情、回到地图
