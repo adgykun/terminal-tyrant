@@ -9,6 +9,7 @@ import { CharacterPanel } from "./components/CharacterPanel";
 import { PartyPanel } from "./components/PartyPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { QuestPanel } from "./components/QuestPanel";
+import { LordPanel } from "./components/LordPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
 import { BattleView } from "./battle/BattleView";
@@ -160,6 +161,8 @@ export default function App() {
         return <InventoryPanel state={gs} performAction={game.performAction} />;
       case "quests":
         return <QuestPanel state={gs} performAction={game.performAction} />;
+      case "lords":
+        return <LordPanel state={gs} performAction={game.performAction} />;
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
       case "battle":
