@@ -33,6 +33,7 @@ import {
   isModelLoaded,
   type AnimKind,
 } from "./ModelCache";
+import type { TerrainFeature } from "./Terrain";
 
 /** 单个实体的渲染状态（模型实例 or 锥体回退）。 */
 interface RenderUnit {
@@ -76,6 +77,9 @@ export class RenderSystem extends System {
   private siegeGateOpen = false;
   private siegeGateOpenT = 0;
   private siegeGateMat: THREE.MeshBasicMaterial | null = null;
+  // ===== 地形 =====
+  /** 高度采样函数（无地形时为 null，单位贴地）。 */
+  private heightAt: ((x: number, z: number) => number) | null = null;
   // ===== 模型 / 动画配置 =====
   /** 超过此距离（世界单位）的单位不再更新动画，用静态姿势。 */
   private static readonly DISTANCE_CULL = 50;
@@ -237,6 +241,46 @@ export class RenderSystem extends System {
     this.siegeGate.rotation.x = -this.siegeGateOpenT * (Math.PI / 2.2);
   }
 
+  /**
+   * 搭建地形视觉：山丘（绿色锥/球）、林地（深绿圆）、河流（蓝色带）。
+   * 只应在战斗初始化时调用一次。
+   */
+  enableTerrain(features: TerrainFeature[], heightAt: (x: number, z: number) => number): void {
+    for (const f of features) {
+      if (f.type === "hill") {
+        const mag = f.magnitude ?? 4;
+        const hill = new THREE.Mesh(
+          new THREE.SphereGeometry(f.radius, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0x4a6b3a }),
+        );
+        hill.scale.y = (mag / f.radius) * 1.1;
+        hill.position.set(f.x, 0, f.z);
+        this.scene.add(hill);
+      } else if (f.type === "wood") {
+        // 林地：若干深绿圆点表示树冠
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2;
+          const r = f.radius * (0.35 + ((i * 37) % 60) / 100);
+          const tree = new THREE.Mesh(
+            new THREE.ConeGeometry(1.1, 3.2, 6),
+            new THREE.MeshBasicMaterial({ color: 0x2f4f2a }),
+          );
+          tree.position.set(f.x + Math.cos(a) * r, 1.6, f.z + Math.sin(a) * r);
+          this.scene.add(tree);
+        }
+      } else if (f.type === "river") {
+        const river = new THREE.Mesh(
+          new THREE.PlaneGeometry(f.radius * 2, (f.magnitude ?? 3) * 2),
+          new THREE.MeshBasicMaterial({ color: 0x2a5a8a, side: THREE.DoubleSide }),
+        );
+        river.rotation.x = -Math.PI / 2;
+        river.position.set(f.x, 0.03, f.z);
+        this.scene.add(river);
+      }
+    }
+    this.heightAt = heightAt;
+  }
+
   update(dt: number): void {
     this.updateFocus(dt);    if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
     this.updateSiegeVisual(dt);
@@ -254,7 +298,8 @@ export class RenderSystem extends System {
         this.units.set(e.id, unit);
       }
       const pos = unit.root.position;
-      pos.set(p.x, p.y, p.z);
+      const groundY = this.heightAt ? this.heightAt(p.x, p.z) : 0;
+      pos.set(p.x, groundY + p.y, p.z);
       // 模型朝向：面向最近敌人（或默认朝 -x 方向，即敌方所在侧）
       this.faceEnemy(e, unit.root);
       // 动画更新（远距离跳过）
