@@ -70,6 +70,11 @@ export class World {
     }
   }
 
+  /** 手动步进一帧（供无头模拟 / 测试使用，不依赖 requestAnimationFrame）。 */
+  step(dt: number): void {
+    for (const s of this.systems) s.update(dt);
+  }
+
   /** 启动主循环。 */
   start(): void {
     if (this.running) return;
