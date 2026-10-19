@@ -1,4 +1,5 @@
 import { BANNERLORD_TROOPS, troopsByCulture } from "./troops_bannerlord";
+import { LORDS_BANNERLORD, lordsOfKingdom } from "./lords_bannerlord";
 // === 大地图 AI 动态单位（骑砍式活地图） ===
 
 export interface MapUnit {
@@ -15,6 +16,8 @@ export interface MapUnit {
   color: string;        // token 主色
   dwell: number;        // 到点停留剩余秒数（>0 时不动）
   troops?: Record<string, number>;  // 骑砍式兵力构成（unit_id → 数量）
+  /** 统率这支军团的具名领主（骑砍式：每支野战军都由某位领主带领）。 */
+  lordId?: string;
 }
 
 // 势力名 → hex（与 FACTION_COLORS 对齐）
@@ -112,23 +115,34 @@ export function generateMapUnits(
 
   const pickLoc = () => usable[Math.floor(rnd() * usable.length)];
 
-  // 军队：每个势力 1-2 支
+  // 军队：每个势力 1-2 支，每支由该王国的一位具名领主统率
+  const lordCursor: Record<string, number> = {};
   facts.forEach((f: any, fi: number) => {
     const n = 1 + (rnd() < 0.5 ? 1 : 0);
+    const kingdom = RF_TO_KINGDOM[f.id] || f.id;
+    const kingdomLords = lordsOfKingdom(kingdom);
     for (let i = 0; i < n; i++) {
       const s = pickLoc();
       const cult = cultureOf(region, f.id);
       const comp = makeTroopComp(cult, rnd);
       const powerSum = Object.entries(comp).reduce((sum, [uid, cnt]) => sum + (BANNERLORD_TROOPS[uid]?.power ?? 1) * cnt, 0);
-      const factionKey = RF_TO_KINGDOM[f.id] || f.id;
+      const factionKey = kingdom;
+      // 轮流分配领主（该王国没有定义领主时退化为通用军团名）
+      const idx = lordCursor[kingdom] ?? 0;
+      const lord = kingdomLords.length > 0 ? kingdomLords[idx % kingdomLords.length] : null;
+      if (lord) lordCursor[kingdom] = idx + 1;
       units.push({
         id: `army_${fi}_${i}_${seed}`,
         x: s.x + (rnd() * 4 - 2), y: s.y + (rnd() * 4 - 2),
         faction: f.id, type: "army",
         factionKey, // 八王国主键（用于敌我判断）
         targetX: 0, targetY: 0, speed: 2.2 + rnd() * 1.2,
-        name: `${CULTURE_ARMY_PREFIX[cult] || f.name || "军队"}(${powerSum})`, color: mapHex(f.id, f.name), dwell: 0,
+        name: lord
+          ? `${lord.name}的军团(${powerSum})`
+          : `${CULTURE_ARMY_PREFIX[cult] || f.name || "军队"}(${powerSum})`,
+        color: mapHex(f.id, f.name), dwell: 0,
         troops: comp,
+        lordId: lord?.id,
       });
     }
   });
