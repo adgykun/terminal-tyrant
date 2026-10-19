@@ -32,6 +32,9 @@ import { PlayerInputSystem } from "./PlayerInputSystem";
 import { Formation } from "./Formation";
 import { FormationSystem } from "./FormationSystem";
 import { CommandSystem, type CommandState } from "./CommandSystem";
+import { Morale } from "./Morale";
+import { MoraleSystem } from "./MoraleSystem";
+import { RoutSystem } from "./RoutSystem";
 import { preloadModels } from "./ModelCache";
 
 /** 战斗结算数据。 */
@@ -109,14 +112,19 @@ export function BattleView({
     const targetingSys = new TargetingSystem();
     const moveSys = new MovementSystem();
     const combatSys = new CombatSystem();
+    const moraleSys = new MoraleSystem();
+    const routSys = new RoutSystem();
     const renderSys = new RenderSystem(mount);
-    // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → 交战 → 渲染
+    // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → 交战
+    //          → 士气演化 → 溃逃位移 → 渲染
     world.addSystem(playerInputSys);
     world.addSystem(commandSys);
     world.addSystem(formationSys);
     world.addSystem(targetingSys);
     world.addSystem(moveSys);
     world.addSystem(combatSys);
+    world.addSystem(moraleSys);
+    world.addSystem(routSys);
     world.addSystem(renderSys);
     // 指挥状态变化 → 更新 HUD（切阵型/指令时触发）
     commandSys.onChange = (state) => setCommand(state);
@@ -143,7 +151,8 @@ export function BattleView({
           .addComponent(new Target(null))
           .addComponent(new Visual(spec.radius, spec.height))
           .addComponent(new MoveSpeed(spec.speed))
-          .addComponent(new TroopType(spec.name));
+          .addComponent(new TroopType(spec.name))
+          .addComponent(new Morale(80, false));
         // 玩家方军队挂阵型组件（默认 line，锚点=初始生成点，角度指向敌方）
         if (withFormation) {
           e.addComponent(new Formation("line", 0, x0, 0));
@@ -165,13 +174,16 @@ export function BattleView({
       .addComponent(new Visual(0.75, 1.65))
       .addComponent(new MoveSpeed(4.2))
       .addComponent(new PlayerControl())
-      .addComponent(new TroopType("player"));
+      .addComponent(new TroopType("player"))
+      .addComponent(new Morale(100, true));
     playerInputSys.setPlayer(player);
     commandSys.setPlayer(player);
     world.start();
     return () => {
       world.stop();
       world.removeSystem(renderSys);
+      world.removeSystem(routSys);
+      world.removeSystem(moraleSys);
       world.removeSystem(combatSys);
       world.removeSystem(moveSys);
       world.removeSystem(targetingSys);

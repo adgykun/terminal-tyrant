@@ -18,6 +18,7 @@ import { Target } from "./Target";
 import { MoveSpeed } from "./MoveSpeed";
 import { PlayerControl } from "./PlayerControl";
 import { Formation } from "./Formation";
+import { Morale } from "./Morale";
 
 export class TargetingSystem extends System {
   /** 与友军的最小间距（排斥半径）。 */
@@ -34,7 +35,13 @@ export class TargetingSystem extends System {
   update(_dt: number): void {
     const units = this.world.query(Position, Velocity, Team, Health, Attack, Target, MoveSpeed);
     // 0. 排除玩家控制实体（玩家由 PlayerInputSystem 直接操控，AI 不寻敌/不走位/不被排斥）
-    const aiUnits = units.filter((u) => !u.hasComponent(PlayerControl));
+    //    同时排除正在溃逃的单位（溃逃由 RoutSystem 接管位移，不寻敌、不排斥）
+    const aiUnits = units.filter((u) => {
+      if (u.hasComponent(PlayerControl)) return false;
+      const morale = u.getComponent(Morale);
+      if (morale && morale.isRouting) return false;
+      return true;
+    });
     // 0.5 阵型模式判定：非冲锋的玩家方阵型单位（formation / hold / retreat）
     //    保持阵型位置，不走位、不排斥；只有敌人进入防御半径才锁定交战。
     const inFormation = (u: Entity): boolean => {
