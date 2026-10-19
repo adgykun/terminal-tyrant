@@ -14,6 +14,7 @@ import { LordPanel } from "./components/LordPanel";
 import { KingdomPanel } from "./components/KingdomPanel";
 import { CombatModal } from "./components/CombatModal";
 import { CaravanTradePanel } from "./components/CaravanTradePanel";
+import { DialoguePanel } from "./components/DialoguePanel";
 import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops, siege_defender_troops, siege_assault_victory, siege_assault_defeat } from "./core/engine";
 import { reportBattle } from "./core/battle_bridge";
@@ -23,6 +24,7 @@ import { LOCATIONS, FACTIONS } from "./core/data";
 export default function App() {
   const game = useGame();
   const [tradeCaravan, setTradeCaravan] = useState<{ id: string; name: string } | null>(null);
+  const [talkLordId, setTalkLordId] = useState<string | null>(null);
 
   if (!game.state) {
     return <StartMenu onStart={game.startNewGame} onLoad={game.loadGame} hasSave={game.hasSave} />;
@@ -200,7 +202,13 @@ export default function App() {
       case "quests":
         return <QuestPanel state={gs} performAction={game.performAction} />;
       case "lords":
-        return <LordPanel state={gs} performAction={game.performAction} />;
+        return (
+          <LordPanel
+            state={gs}
+            performAction={game.performAction}
+            onTalk={(lordId) => setTalkLordId(lordId)}
+          />
+        );
       case "kingdom":
         return <KingdomPanel state={gs} performAction={game.performAction} />;
       case "battle":
@@ -273,6 +281,23 @@ export default function App() {
         </div>
       </div>
       <LogPanel logs={game.logs} />
+
+      {talkLordId && (
+        <DialoguePanel
+          npcId={talkLordId}
+          npcKind="lord"
+          state={gs}
+          identity={{
+            kingdom: (gs as any).vassal_of ?? null,
+            isKing: !!gs.is_king,
+            renown: gs.renown ?? 0,
+            fiefCount: gs.fiefs?.length ?? 0,
+          }}
+          relation={gs.lords_runtime?.[talkLordId]?.relationWithPlayer ?? 0}
+          onClose={() => setTalkLordId(null)}
+          performAction={game.performAction}
+        />
+      )}
 
       {tradeCaravan && (
         <CaravanTradePanel
