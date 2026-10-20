@@ -1,7 +1,8 @@
 import type { GameState } from "../core/state";
 import { FACTIONS, EQUIPMENT, KNIGHT_ORDERS, MERCENARY_RANKS } from "../core/data";
 import { get_total_appearance, reveal_appearance, get_mercenary_info, get_knight_order_info, get_current_region } from "../core/engine";
-import { User, Eye, Star, Heart, Skull, Sparkles, Scroll, Crown } from "lucide-react";
+import { derivePlayerCombat } from "../core/player_combat";
+import { User, Eye, Star, Heart, Skull, Sparkles, Scroll, Crown, Swords } from "lucide-react";
 
 interface CharacterPanelProps {
   state: GameState;
@@ -16,6 +17,8 @@ export function CharacterPanel({ state, performAction }: CharacterPanelProps) {
     slot,
     item: EQUIPMENT[eqId],
   }));
+  // 战斗属性推导（属性 + 装备）
+  const combat = derivePlayerCombat(state.attributes ?? {}, state.equipment ?? {});
 
   return (
     <div>
@@ -41,6 +44,31 @@ export function CharacterPanel({ state, performAction }: CharacterPanelProps) {
           </button>
         ) : (
           <div className="text-sm text-gold">外貌已揭晓，当前总外貌值: {totalApp}</div>
+        )}
+      </div>
+
+      {/* 战斗属性（属性 + 装备推导） */}
+      <div className="panel">
+        <div className="panel-title"><Swords size={22} /> 战斗属性</div>
+        <div className="flex-row gap-16 mb-12">
+          <div className="flex-col gap-4" style={{ flex: 1 }}>
+            <StatRow label="生命值" value={combat.hp} />
+            <StatRow label="单次伤害" value={Number(combat.damage.toFixed(1))} />
+            <StatRow label="攻击距离" value={combat.range} />
+          </div>
+          <div className="flex-col gap-4" style={{ flex: 1 }}>
+            <StatRow label="移动速度" value={Number(combat.speed.toFixed(2))} />
+            <StatRow label="护甲减伤" value={`${Math.round(combat.damageReduction * 100)}%`} />
+            <StatRow label="士气光环" value={combat.moraleAura > 0 ? `+${combat.moraleAura}` : combat.moraleAura} />          </div>
+        </div>
+        <div className="divider" />
+        <div className="text-sm text-secondary mb-8">属性推导明细</div>
+        {combat.breakdown.length === 0 ? (
+          <div className="text-muted text-sm">尚无属性或装备加成</div>
+        ) : (
+          combat.breakdown.map((b, i) => (
+            <div key={i} className="text-sm text-muted" style={{ lineHeight: 1.8 }}>· {b}</div>
+          ))
         )}
       </div>
 
@@ -195,7 +223,7 @@ export function CharacterPanel({ state, performAction }: CharacterPanelProps) {
   );
 }
 
-function StatRow({ label, value, icon }: { label: string; value: number; icon?: React.ReactNode }) {
+function StatRow({ label, value, icon }: { label: string; value: number | string; icon?: React.ReactNode }) {
   return (
     <div className="flex-row" style={{ justifyContent: "space-between" }}>
       <span className="text-sm text-secondary flex-row gap-4">{icon}{label}</span>
