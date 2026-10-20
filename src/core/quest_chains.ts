@@ -188,15 +188,25 @@ export function completeChainQuest(state: any, quest: any): void {
 }
 
 /** 供 UI 展示：玩家当前的链进度。 */
-export function chainProgressSummary(state: any): { name: string; done: number; total: number; finished: boolean }[] {
+export function chainProgressSummary(state: any): {
+  name: string;
+  done: number;
+  total: number;
+  finished: boolean;
+  /** 是否已接取当前步骤（进行中）。 */
+  active: boolean;
+}[] {
   const cs = initChainState(state);
   return QUEST_CHAINS.map((c) => {
     const p = cs[c.id];
+    const done = p?.completed.length ?? 0;
+    const active = !p?.finished && (p?.activeStep ?? -1) >= 0;
     return {
       name: c.name,
-      done: p?.completed.length ?? 0,
+      done,
       total: c.steps.length,
       finished: p?.finished ?? false,
+      active,
     };
   });
 }
