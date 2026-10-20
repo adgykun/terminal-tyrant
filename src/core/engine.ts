@@ -83,8 +83,23 @@ import {
 } from "./diplomacy.js";
 import { lordsDailyUpdate, ensureLords, defeatLord } from "./lords_system.js";
 import { troopsByCulture, BANNERLORD_TROOPS } from "./troops_bannerlord.js";
+import {
+  chainQuestsFor,
+  acceptChainQuest,
+  completeChainQuest,
+} from "./quest_chains.js";
 
 let _quest_id_counter = 1;
+/**
+ * 当前对局的 state 引用（供 generate_quests 等「纯地点函数」读取全局链进度）。
+ * 由 daily_update / performAction 路径设置；读档后由调用方重新注入。
+ */
+let _activeGameState: any = null;
+
+/** 注入当前对局 state（供任务链等全局系统使用）。 */
+export function setActiveGameState(state: any): void {
+    _activeGameState = state;
+}
 
 // 随机数辅助函数
 function randomInt(min: number, max: number): number {
@@ -332,7 +347,9 @@ export function update_faction_relations(state: any): void {
 }
 
 /** 每日结算：为城镇生成任务。 */
-export function generate_quests(location_id: string): void {
+export function generate_quests(location_id: string, gameState?: any): void {
+    // 若显式传入 state，则同时注入全局（供任务链读取进度）
+    if (gameState) setActiveGameState(gameState);
     const loc = LOCATIONS[location_id];
     if (!loc || loc.type !== "town") {
         return;
@@ -344,6 +361,20 @@ export function generate_quests(location_id: string): void {
 
     const active_quests = loc.active_quests;
     const other_locations = Object.keys(LOCATIONS).filter(lid => lid !== location_id);
+
+    // ── 优先填充任务链（有因果关系的故事线），不足再用随机模板补齐 ──
+    // 注意：链状态存在游戏全局 state 上，而非地点上；generate_quests 是纯地点函数，
+    // 因此这里用模块级「当前对局 state」注入（由 daily_update 设置）。
+    const chainQuests = _activeGameState
+        ? chainQuestsFor(_activeGameState, location_id, () => `q_${_quest_id_counter++}`)
+        : [];
+    for (const q of chainQuests) {
+        if (active_quests.length >= 3) break;
+        // 避免同一链步骤重复上板
+        if (!active_quests.some((x: any) => x.chainId === q.chainId && x.chainStep === q.chainStep)) {
+            active_quests.push(q);
+        }
+    }
 
     while (active_quests.length < 3) {
         const template = randomChoice(QUEST_TEMPLATES);
@@ -439,6 +470,8 @@ export function accept_quest(state: any, quest_id: string): string {
         active_quests.splice(idx, 1);
     }
     state.active_quests.push(target_quest);
+    // 任务链：标记该步骤为「已接取」
+    acceptChainQuest(state, target_quest);
     const msg = `成功接取任务：${target_quest.desc}`;
     state.add_log(msg);
     return msg;
@@ -490,6 +523,21 @@ export function complete_quest(state: any, quest_id: string): string {
         if (curr_cnt < target_cnt) {
             return `任务未完成！还需剿灭 ${target_cnt - curr_cnt} 个匪徒`;
         }
+    } else if (q_type === "meet_lord") {
+        // 见领主：需要在目标地点，且已与该领主对过话（lords 里有交互记录）
+        const target_loc_id = target_quest.target_location;
+        if (state.location !== target_loc_id) {
+            const name = LOCATIONS[target_loc_id]?.name ?? target_loc_id;
+            return `尚未到达目标地点！需要前往 [${name}]`;
+        }
+        const lordId = target_quest.target_lord;
+        if (lordId) {
+            const met = (state.lords_runtime?.[lordId]?.relationWithPlayer ?? 0) !== 0
+                || (state.completed_quests ?? []).some((q: string) => q.includes(lordId));
+            if (!met) {
+                return `还未见到目标领主。请在「领主」面板中与其交谈。`;
+            }
+        }
     }
 
     const reward_cash = target_quest.reward_cash ?? 0;
@@ -504,7 +552,15 @@ export function complete_quest(state: any, quest_id: string): string {
     }
     state.completed_quests.push(quest_id);
 
-    const msg = `成功完成任务 [${target_quest.desc}]！获得 ${reward_cash} 金币，${reward_renown} 声望。`;
+    // 任务链：标记步骤完成，解锁后续（并附上专属完成对白）
+    const chainMsg = target_quest.is_chain
+        ? (() => {
+            completeChainQuest(state, target_quest);
+            return target_quest.completion ? `\n${target_quest.completion}` : "";
+          })()
+        : "";
+
+    const msg = `成功完成任务 [${target_quest.desc}]！获得 ${reward_cash} 金币，${reward_renown} 声望。${chainMsg}`;
     state.add_log(msg);
     return msg;
 }
@@ -590,6 +646,8 @@ export function conquer_location(state: any, location_id: string, action: string
 
 /** 每日结算：收税、耗粮、势力关系演变、任务生成与士气/解散判定。 */
 export function daily_update(state: any): string {
+    // 注入当前对局 state（供任务链等全局系统读取）
+    setActiveGameState(state);
     // 0. 外交动态演变与任务生成
     update_faction_relations(state);
     // 0.0 围城自动推进（每日一次）
@@ -600,7 +658,7 @@ export function daily_update(state: any): string {
     // 0.0b 领主个人部队恢复（被俘/阵亡者不恢复）
     lordsDailyUpdate(state);
     for (const loc_id of Object.keys(LOCATIONS)) {
-        generate_quests(loc_id);
+        generate_quests(loc_id, state);
     }
 
     // 0.1 Phase 16: 生成世界新闻，并结算与玩家结怨领主的关系衰减
@@ -1266,7 +1324,6 @@ export function trade(state: any, location_id: string, action: string, goods_id:
     const goods_info = GOODS[goods_id] || {};
     const goods_name = goods_info.name ?? goods_id;
     const price_info = market[goods_id];
-
     if (action === "buy") {
         const buy_price = price_info.buy_price ?? 0;
         const total_cost = buy_price * quantity;

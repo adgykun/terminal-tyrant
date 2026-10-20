@@ -61,6 +61,8 @@ export interface GameStateData {
     diplomacy?: any;
     /** 领主个人运行时状态（兵力/好感/俘虏/生死）。 */
     lords_runtime?: Record<string, any>;
+    /** 任务链进度（chainId → 完成/进行中的步骤）。 */
+    quest_chains?: Record<string, any>;
 }
 
 /** 管理游戏世界的持久化状态数据结构。 */
@@ -124,6 +126,8 @@ export class GameState {
     diplomacy?: any;
     /** 领主个人运行时状态（兵力/好感/俘虏/生死）。 */
     lords_runtime?: Record<string, any>;
+    /** 任务链进度（chainId → {completed, activeStep, finished}）。 */
+    quest_chains?: Record<string, any>;
 
     constructor(data: GameStateData = {}) {
         this.day = data.day ?? 1;
@@ -195,6 +199,7 @@ export class GameState {
         this.travel_accum = data.travel_accum ?? 0;
         this.diplomacy = data.diplomacy;
         this.lords_runtime = data.lords_runtime;
+        this.quest_chains = data.quest_chains;
     }
 
     /** 金钱属性别名，指向 gold。 */
@@ -281,6 +286,7 @@ export class GameState {
             travel_accum: this.travel_accum,
             diplomacy: this.diplomacy ?? null,
             lords_runtime: this.lords_runtime ? { ...this.lords_runtime } : null,
+            quest_chains: this.quest_chains ? { ...this.quest_chains } : null,
         };
     }
 
@@ -344,6 +350,7 @@ export class GameState {
             travel_accum: data.travel_accum ?? 0,
             diplomacy: data.diplomacy ?? null,
             lords_runtime: data.lords_runtime ?? null,
+            quest_chains: data.quest_chains ?? null,
         });
     }
 
