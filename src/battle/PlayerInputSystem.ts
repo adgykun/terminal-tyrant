@@ -17,12 +17,12 @@ import { PlayerControl } from "./PlayerControl";
 import { MoveSpeed } from "./MoveSpeed";
 
 export class PlayerInputSystem extends System {
-  /** 玩家攻击范围倍率（英雄感）。 */
-  private static readonly RANGE_MULT = 1.5;
-  /** 玩家伤害倍率（英雄感）。 */
-  private static readonly DAMAGE_MULT = 2;
   /** 攻击指令触发后的最短间隔（秒），避免按住鼠标连发过于变态。 */
   private static readonly INPUT_COOLDOWN = 0.45;
+  /** 玩家攻击范围倍率（英雄感；武器长度已计入 Attack.range）。 */
+  private static readonly RANGE_MULT = 1.15;
+  /** 玩家伤害倍率（英雄感；装备/属性伤害已计入 Attack.damage）。 */
+  private static readonly DAMAGE_MULT = 1.25;
   /** 玩家实体 id（由 BattleView 在生成实体时设置）。 */
   private playerId: number | null = null;
   private readonly keys = new Set<string>();
@@ -35,6 +35,11 @@ export class PlayerInputSystem extends System {
     this.playerId = entity.id;
     this.bind();
   }
+  /**
+   * AI 代打开关（无头模拟 / 测试用）。
+   * 开启后每帧自动对最近敌人出手，无需真实键盘输入。
+   */
+  autoAttack = false;
   onDetach(): void {
     this.unbind();
     this.playerId = null;
@@ -70,9 +75,9 @@ export class PlayerInputSystem extends System {
       vel.vx = 0;
       vel.vz = 0;
     }
-    // 2. 攻击指令（空格 / 鼠标左键）
+    // 2. 攻击指令（空格 / 鼠标左键；autoAttack 下每帧自动出手）
     pc.attackTimer = Math.max(0, pc.attackTimer - dt);
-    const wantAttack = this.mouseDown || this.keys.has("Space");
+    const wantAttack = this.mouseDown || this.keys.has("Space") || this.autoAttack;
     if (wantAttack && !pc.attackPressed && pc.attackTimer <= 0) {
       pc.attackPressed = true;
       this.tryAttack(player);
@@ -103,7 +108,7 @@ export class PlayerInputSystem extends System {
       }
     }
     if (!best) return;
-    // 最近敌人：指向它，并判定范围（1.5x 范围）
+    // 最近敌人：指向它，并判定范围
     const op = best.getComponent(Position)!;
     const dx = op.x - p.x;
     const dz = op.z - p.z;
@@ -113,7 +118,7 @@ export class PlayerInputSystem extends System {
     pc.attackTimer = PlayerInputSystem.INPUT_COOLDOWN;
     pc.attackPressed = false;
     // 范围内才出手（超出范围只转向 + 开始冷却，不扣血）
-    if (bestD <= range * range) {
+    if (bestD <= range) {
       const hp = best.getComponent(Health)!;
       hp.hp -= damage;
       if (!hp.alive) this.world.destroyEntity(best);
@@ -138,6 +143,8 @@ export class PlayerInputSystem extends System {
     this.mouseDown = false;
   };
   private bind(): void {
+    // 无 DOM 环境（无头模拟 / 测试）下跳过绑定
+    if (typeof window === "undefined") return;
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("mousedown", this.onMouseDown);
@@ -145,6 +152,7 @@ export class PlayerInputSystem extends System {
     window.addEventListener("blur", this.onBlur);
   }
   private unbind(): void {
+    if (typeof window === "undefined") return;
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("mousedown", this.onMouseDown);

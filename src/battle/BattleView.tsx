@@ -60,6 +60,11 @@ interface BattleViewProps {
   onBattleEnd?: (result: BattleEndResult) => void;
   /** 攻城战：给出则进入攻城模式（城墙隔开两军，先破门再肉搏）。 */
   siege?: { name: string; gateHp?: number };
+  /** 玩家英雄的战斗属性（由角色属性+装备+技能推导；缺省用默认值）。 */
+  playerStats?: {
+    hp: number; damage: number; range: number; cooldown: number;
+    speed: number; ranged: boolean; damageReduction?: number;
+  };
 }
 
 export function BattleView({
@@ -68,6 +73,7 @@ export function BattleView({
   maxUnits = 60,
   onBattleEnd,
   siege,
+  playerStats,
 }: BattleViewProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<World | null>(null);
@@ -156,6 +162,8 @@ export function BattleView({
     const terrain: TerrainField = terrainFromFeatures(terrainFeatures);
     targetingSys.terrain = terrain;
     combatSys.terrain = terrain;
+    // 玩家护甲减伤（装备推导）
+    combatSys.playerDamageReduction = playerStats?.damageReduction ?? 0;
     // 执行顺序：玩家输入 → 指挥指令 → 阵型排布 → AI 寻敌走位 → 位移 → [攻城：城墙阻挡/砸门] → 交战
     //          → 士气演化 → 溃逃位移 → 渲染
     const siegeSys = isSiege
@@ -246,17 +254,19 @@ export function BattleView({
     };
     spawnArmy(0, 0x4a90ff, 8, pList, true);
     spawnArmy(1, 0xff5050, -8, eList);
-    // 玩家英雄实体：蓝色、体积 1.5 倍、高血量高攻击，带 PlayerControl
+    // 玩家英雄实体：属性由「角色属性 + 装备 + 技能」推导，而非硬编码
+    // 未传 playerStats 时用默认值（保持向后兼容）
+    const pStats = playerStats ?? { hp: 300, damage: 20, range: 1.6, cooldown: 0.8, speed: 4.2, ranged: false, damageReduction: 0 };
     const player = world.createEntity();
     player
       .addComponent(new Position(isSiege ? SIEGE_LAYOUT.gateX : 8, 0.9, isSiege ? SIEGE_LAYOUT.gateZ + 12 : 0))
       .addComponent(new Velocity(0, 0, 0))
       .addComponent(new Team(0, 0x44ccff))
-      .addComponent(new Health(300))
-      .addComponent(new Attack(20, 1.6, 0.8))
+      .addComponent(new Health(pStats.hp))
+      .addComponent(new Attack(pStats.damage, pStats.range, pStats.cooldown, pStats.ranged))
       .addComponent(new Target(null))
       .addComponent(new Visual(0.75, 1.65))
-      .addComponent(new MoveSpeed(4.2))
+      .addComponent(new MoveSpeed(pStats.speed))
       .addComponent(new PlayerControl())
       .addComponent(new TroopType("player"))
       .addComponent(new Morale(100, true));

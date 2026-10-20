@@ -28,6 +28,8 @@ export class CombatSystem extends System {
   private static readonly Z_TOLERANCE = 1.2;
   /** 当前战场地形（平地则不影响）。 */
   terrain: TerrainField | null = null;
+  /** 玩家护甲减伤比例（0-0.6），由 BattleView 从角色装备推导注入。 */
+  playerDamageReduction = 0;
   /** 玩家出手命中时的回调（BattleView 接入 camera shake）。 */
   onPlayerAttack: (() => void) | null = null;
   constructor() {
@@ -86,7 +88,7 @@ export class CombatSystem extends System {
     return dx <= atk.range && dz <= CombatSystem.Z_TOLERANCE;
   }
 
-  /** 出手：冷却完毕则扣血（远程受高度加成）；返回目标是否因此阵亡。 */
+  /** 出手：冷却完毕则扣血（远程受高度加成；玩家护甲减伤）；返回目标是否因此阵亡。 */
   private tryAttack(attacker: Entity, target: Entity): boolean {
     const atk = attacker.getComponent(Attack)!;
     if (atk.timer > 0) return false;
@@ -97,6 +99,10 @@ export class CombatSystem extends System {
       const pa = attacker.getComponent(Position)!;
       const pb = target.getComponent(Position)!;
       dmg *= heightDamageBonus(field.heightAt(pa.x, pa.z), field.heightAt(pb.x, pb.z));
+    }
+    // 玩家护甲减伤（PlayerControl 实体 + playerDamageReduction > 0）
+    if (target.hasComponent(PlayerControl) && this.playerDamageReduction > 0) {
+      dmg *= 1 - this.playerDamageReduction;
     }
     hp.hp -= dmg;
     atk.timer = atk.cooldown;
