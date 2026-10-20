@@ -346,10 +346,24 @@ export function update_faction_relations(state: any): void {
     }
 }
 
-/** 每日结算：为城镇生成任务。 */
-export function generate_quests(location_id: string, gameState?: any): void {
-    // 若显式传入 state，则同时注入全局（供任务链读取进度）
-    if (gameState) setActiveGameState(gameState);
+/**
+ * 为城镇生成任务。
+ *
+ * 注意签名约定：本函数通过 performAction 调用时，state 会作为第一个参数注入
+ * （见 useGame.performAction：action(gs, ...args)）。
+ * 因此 location_id 形参实际拿到的是 state，这里做双向兼容：
+ *   - 第一参数为字符串 → 视作 location_id（直接调用/测试场景）；
+ *   - 第一参数为对象 → 视作 state，从第二个参数取 location_id。
+ */
+export function generate_quests(location_id_or_state: any, maybeStateOrLoc?: any): void {
+    const state: any = typeof location_id_or_state === "object" && location_id_or_state !== null
+        ? location_id_or_state
+        : maybeStateOrLoc;
+    const location_id: string = typeof location_id_or_state === "string"
+        ? location_id_or_state
+        : (state?.location ?? "");
+    // 注入全局 state（供任务链读取进度）
+    if (state) setActiveGameState(state);
     const loc = LOCATIONS[location_id];
     if (!loc || loc.type !== "town") {
         return;
@@ -658,7 +672,7 @@ export function daily_update(state: any): string {
     // 0.0b 领主个人部队恢复（被俘/阵亡者不恢复）
     lordsDailyUpdate(state);
     for (const loc_id of Object.keys(LOCATIONS)) {
-        generate_quests(loc_id, state);
+        generate_quests(state, loc_id);
     }
 
     // 0.1 Phase 16: 生成世界新闻，并结算与玩家结怨领主的关系衰减
