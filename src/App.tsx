@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useGame } from "./hooks/useGame";
 import { StatusBar } from "./components/StatusBar";
 import { Sidebar } from "./components/Sidebar";
@@ -18,6 +18,7 @@ import { DialoguePanel } from "./components/DialoguePanel";
 import { BattleView } from "./battle/BattleView";
 import { move, resolve_combat_simple, move_region, advance_free_move, start_siege, siege_daily_progress, assault_siege, retreat_siege, join_army, leave_army, trigger_battle, power_to_enemy_troops, siege_defender_troops, siege_assault_victory, siege_assault_defeat } from "./core/engine";
 import { reportBattle } from "./core/battle_bridge";
+import { derivePlayerCombat } from "./core/player_combat";
 import { defeatLord } from "./core/lords_system";
 import { LOCATIONS, FACTIONS } from "./core/data";
 
@@ -31,6 +32,12 @@ export default function App() {
   }
 
   const gs = game.state;
+
+  // 玩家英雄战斗属性：由角色属性 + 装备推导（3D 战场与文本战斗共用）
+  const playerCombatStats = useMemo(
+    () => (gs ? derivePlayerCombat(gs.attributes ?? {}, gs.equipment ?? {}) : null),
+    [gs?.attributes?.strength, gs?.attributes?.intellect, gs?.attributes?.charm, gs?.equipment],
+  );
 
   const renderView = () => {
     switch (game.view) {
@@ -217,6 +224,7 @@ export default function App() {
             playerTroops={gs.troops}
             enemyTroops={game.battleEnemy?.enemyTroops}
             siege={game.battleEnemy?.siege}
+            playerStats={playerCombatStats ?? undefined}
             onBattleEnd={(result) => {
               const targetUnitId = game.battleEnemy?.sourceUnitId;
               const targetLordId = game.battleEnemy?.sourceLordId;
