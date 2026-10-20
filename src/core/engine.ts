@@ -1990,6 +1990,52 @@ export function upgrade_unit(state: any, unit_id: string, quantity: number, targ
     return msg;
 }
 
+/**
+ * 骑砍2 兵种晋升：读 BANNERLORD_TROOPS 的 upgrade_targets。
+ * state.troops 用兵种 id 作键，因此老 UNITS 表缺该兵种时也能正常工作。
+ */
+export function upgrade_bannerlord_unit(state: any, unit_id: string, quantity: number, target_id?: string): string {
+    if (quantity <= 0) return "晋升数量必须大于 0";
+    const cur = state.troops[unit_id] ?? 0;
+    const info = (BANNERLORD_TROOPS as any)[unit_id];
+    const unit_name = info?.name ?? UNITS[unit_id]?.name ?? unit_id;
+    if (cur < quantity) {
+        return `兵员不足！当前拥有 ${unit_name}：${cur}，尝试晋升：${quantity}`;
+    }
+    const targets: string[] = info?.upgrade_targets ?? (info?.upgrade_to ? [info.upgrade_to] : []);
+    if (targets.length === 0) {
+        return `${unit_name} 已无法继续晋升`;
+    }
+    const to = target_id && targets.includes(target_id) ? target_id : targets[0];
+    const costPer = info?.upgrade_cost ?? 0;
+    const total = costPer * quantity;
+    if ((state.cash ?? 0) < total) {
+        return `金钱不足！晋升 ${quantity} ${unit_name} 需要 ${total} 金，当前金钱：${state.cash}`;
+    }
+    state.cash -= total;
+    state.troops[unit_id] -= quantity;
+    state.troops[to] = (state.troops[to] ?? 0) + quantity;
+    const toName = (BANNERLORD_TROOPS as any)[to]?.name ?? UNITS[to]?.name ?? to;
+    const msg = `成功将 ${quantity} ${unit_name} 晋升为 ${quantity} ${toName}，花费 ${total} 金`;
+    state.add_log(msg);
+    return msg;
+}
+
+/** 遣散士兵（主动减员，无补偿；用于精简部队/降低粮耗）。 */
+export function dismiss_troops(state: any, unit_id: string, quantity: number): string {
+    if (quantity <= 0) return "遣散数量必须大于 0";
+    const cur = state.troops[unit_id] ?? 0;
+    if (cur <= 0) return `你没有该兵种的士兵`;
+    const info = (BANNERLORD_TROOPS as any)[unit_id];
+    const name = info?.name ?? UNITS[unit_id]?.name ?? unit_id;
+    const n = Math.min(quantity, cur);
+    state.troops[unit_id] = cur - n;
+    if (state.troops[unit_id] <= 0) delete state.troops[unit_id];
+    const msg = `你遣散了 ${n} 名 ${name}。`;
+    state.add_log(msg);
+    return msg;
+}
+
 /** 购买钓鱼装备（鱼竿或饵料）。 */
 export function buy_gear(state: any, gear_id: string, quantity: number = 1): string {
     if (!(gear_id in FISHING_GEAR)) {
