@@ -33,7 +33,7 @@ export function QuestPanel({ state, performAction }: QuestPanelProps) {
               </span>
               <span className="text-sm text-muted">
                 进度 {c.done} / {c.total}
-                {c.finished ? " · 已完成" : c.done > 0 ? " · 进行中" : " · 未开启"}
+                {c.finished ? " · 已完成" : c.active ? " · 进行中" : c.done > 0 ? " · 进行中" : " · 未开启"}
               </span>
             </div>
           </div>
