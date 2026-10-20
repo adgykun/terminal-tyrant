@@ -43,7 +43,7 @@ export function QuestPanel({ state, performAction }: QuestPanelProps) {
       <div className="panel">
         <div className="panel-title"><ScrollText size={22} /> 当前地点任务</div>
         <div className="flex-row gap-8 mb-12">
-          <button onClick={() => performAction(generate_quests, state.location, state)}>
+          <button onClick={() => performAction(generate_quests, state)}>
             刷新任务列表
           </button>
         </div>
